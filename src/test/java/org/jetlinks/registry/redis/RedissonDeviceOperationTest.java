@@ -39,7 +39,7 @@ public class RedissonDeviceOperationTest {
     @SneakyThrows
     public void testServerOfflineCheckState() {
 
-        DeviceOperation operation = registry.getDevice("test");
+        DeviceOperation operation = registry.getDevice("test2");
         //模拟上线
         operation.online("test2-server", "test");
 
@@ -69,7 +69,7 @@ public class RedissonDeviceOperationTest {
         CountDownLatch latch = new CountDownLatch(1);
 
 
-        DeviceOperation operation = registry.getDevice("test");
+        DeviceOperation operation = registry.getDevice("test2");
         //模拟上线
         operation.online("test2-server", "test");
 
@@ -99,7 +99,7 @@ public class RedissonDeviceOperationTest {
     @SneakyThrows
     public void testSendAndReplyMessage() {
 
-        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test", client, () -> "test-server", () -> {
+        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, () -> "test-server", () -> {
         });
 
         RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client, Executors.newFixedThreadPool(6));
