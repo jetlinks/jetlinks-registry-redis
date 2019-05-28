@@ -13,6 +13,7 @@ import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.codec.*;
 import org.jetlinks.core.metadata.DeviceMetadataCodec;
 
+import javax.annotation.Nonnull;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -24,6 +25,7 @@ public class MockProtocolSupports implements ProtocolSupports {
     public ProtocolSupport getProtocol(String protocol) {
         return new ProtocolSupport() {
             @Override
+            @Nonnull
             public String getId() {
                 return "mock";
             }
@@ -39,6 +41,7 @@ public class MockProtocolSupports implements ProtocolSupports {
             }
 
             @Override
+            @Nonnull
             public DeviceMessageCodec getMessageCodec() {
 
                 return new DeviceMessageCodec() {
@@ -60,12 +63,14 @@ public class MockProtocolSupports implements ProtocolSupports {
             }
 
             @Override
+            @Nonnull
             public DeviceMetadataCodec getMetadataCodec() {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public AuthenticationResponse authenticate(AuthenticationRequest request, DeviceOperation deviceOperation) {
+            @Nonnull
+            public AuthenticationResponse authenticate(@Nonnull AuthenticationRequest request, @Nonnull DeviceOperation deviceOperation) {
                 return AuthenticationResponse.success();
             }
         };

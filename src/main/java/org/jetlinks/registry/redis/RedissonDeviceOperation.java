@@ -1,8 +1,10 @@
 package org.jetlinks.registry.redis;
 
+import com.alibaba.fastjson.JSON;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.jetlinks.core.ProtocolSupport;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.*;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
@@ -13,9 +15,7 @@ import org.redisson.api.RFuture;
 import org.redisson.api.RMap;
 import org.redisson.api.RedissonClient;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -55,6 +55,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    @Override
     public String getServerId() {
         setLastOperationTime();
         return Optional.ofNullable(rMap.get("serverId"))
@@ -84,7 +89,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
         execute(rMap.fastPutAsync("state", state));
     }
 
-    protected void execute(RFuture<?> future) {
+    private void execute(RFuture<?> future) {
         setLastOperationTime();
         try {
             //无论成功失败,最多等待一秒
@@ -108,11 +113,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 }
             } else {
                 //等待检查返回,检查是异步的,需要等待检查完成的信号
-                //一般检查速度很快,所以这里超过1秒则超时,继续执行接下来的逻辑
+                //一般检查速度很快,所以这里超过2秒则超时,继续执行接下来的逻辑
                 try {
                     boolean success = redissonClient
                             .getSemaphore("device:state:check:semaphore:".concat(deviceId))
-                            .tryAcquire((int)subscribes,1, TimeUnit.SECONDS);
+                            .tryAcquire((int) subscribes, 2, TimeUnit.SECONDS);
                     if (!success) {
                         log.warn("device state check time out!");
                     }
@@ -125,18 +130,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 offline();
             }
         }
-    }
-
-    @Override
-    public void ping() {
-    }
-
-    @Override
-    public long getLastPingTime() {
-        setLastOperationTime();
-        return Optional.ofNullable(rMap.get("lastPingTime"))
-                .map(Long.class::cast)
-                .orElse(-1L);
     }
 
     @Override
@@ -168,7 +161,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public void offline() {
         setLastOperationTime();
-        rMap.put("offlineTime", System.currentTimeMillis() + 1000);
+        rMap.put("offlineTime", System.currentTimeMillis());
         putState(DeviceState.offline);
         execute(rMap.fastRemoveAsync("serverId", "sessionId"));
     }
@@ -176,28 +169,41 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
         setLastOperationTime();
-        return protocolSupports
-                .getProtocol(getDeviceInfo().getProtocol())
-                .authenticate(request, this);
+        return getProtocol().authenticate(request, this);
     }
 
     @Override
     public DeviceMetadata getMetadata() {
         setLastOperationTime();
-        String metaJson = (String) rMap.get("metadata");
-        DeviceInfo deviceInfo = getDeviceInfo();
-        if (deviceInfo == null) {
-            throw new UnsupportedOperationException("设备信息不存在");
+
+        Map<String, Object> deviceInfo = rMap.getAll(new HashSet<>(Arrays.asList("metadata", "protocol", "productId")));
+
+        if (deviceInfo == null || deviceInfo.isEmpty()) {
+            throw new NullPointerException("设备信息不存在");
         }
+        String metaJson = (String) deviceInfo.get("metadata");
         //设备没有单独的元数据，则获取设备产品型号的元数据
-        if (metaJson == null) {
-            return registry.getProduct(deviceInfo.getProductId())
-                    .getMetadata();
+        if (metaJson == null || metaJson.isEmpty()) {
+            return registry.getProduct((String) deviceInfo.get("productId")).getMetadata();
         }
         return protocolSupports
-                .getProtocol(deviceInfo.getProtocol())
+                .getProtocol((String) deviceInfo.get("protocol"))
                 .getMetadataCodec()
                 .decode(metaJson);
+    }
+
+    @Override
+    public ProtocolSupport getProtocol() {
+
+        Map<String, Object> all = rMap.getAll(new HashSet<>(Arrays.asList("protocol", "productId")));
+        String protocol = (String) all.get("protocol");
+
+        if (protocol != null) {
+            return protocolSupports.getProtocol(protocol);
+        } else {
+            return registry.getProduct((String) all.get("productId"))
+                    .getProtocol();
+        }
     }
 
     @Override
@@ -209,13 +215,29 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public DeviceInfo getDeviceInfo() {
         setLastOperationTime();
-        return (DeviceInfo) rMap.get("info");
+        Object info = rMap.get("info");
+        if (info instanceof String) {
+            return JSON.parseObject((String) info, DeviceInfo.class);
+        }
+        if (info instanceof DeviceInfo) {
+            return ((DeviceInfo) info);
+        }
+        log.warn("设备信息反序列化错误:{}", info);
+        return null;
     }
 
     @Override
     public void update(DeviceInfo deviceInfo) {
         setLastOperationTime();
-        execute(rMap.fastPutAsync("info", deviceInfo));
+        Map<String, Object> all = new HashMap<>();
+        all.put("info", JSON.toJSONString(deviceInfo));
+        if (deviceInfo.getProtocol() != null) {
+            all.put("protocol", deviceInfo.getProtocol());
+        }
+        if (deviceInfo.getProductId() != null) {
+            all.put("productId", deviceInfo.getProductId());
+        }
+        execute(rMap.putAllAsync(all));
     }
 
     @Override
@@ -223,22 +245,31 @@ public class RedissonDeviceOperation implements DeviceOperation {
         rMap.fastPut("metadata", metadata);
     }
 
+    private String createConfigKey(String key) {
+        return "_cfg:".concat(key);
+    }
+
     @Override
     public ValueWrapper get(String key) {
-        Object conf = rMap.get("_cfg:".concat(key));
-        if (conf == null) {
+        String confKey = createConfigKey(key);
+
+        Map<String, Object> conf = rMap.getAll(new HashSet<>(Arrays.asList(confKey, "productId")));
+        String val = (String) conf.get(confKey);
+        String productId = (String) conf.get("productId");
+
+        if (null == val && null != productId) {
             //获取产品的配置
             return registry
-                    .getProduct(getDeviceInfo().getProductId())
+                    .getProduct(productId)
                     .get(key);
         }
-        return new DefaultValueWrapper(conf);
+        return new DefaultValueWrapper(val);
     }
 
     @Override
     public void put(String key, Object value) {
         setLastOperationTime();
-        rMap.fastPut("_cfg:".concat(key), value);
+        rMap.fastPut(createConfigKey(key), value);
     }
 
     @Override
@@ -246,7 +277,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
         setLastOperationTime();
         Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
-            newMap.put("_cfg:".concat(entry.getKey()), entry.getValue());
+            newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
         rMap.putAll(newMap);
     }
@@ -254,7 +285,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public void remove(String key) {
         setLastOperationTime();
-        rMap.fastRemove("_cfg:".concat(key));
+        rMap.fastRemove(createConfigKey(key));
     }
 
     public void delete() {

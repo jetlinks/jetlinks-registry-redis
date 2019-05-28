@@ -16,7 +16,6 @@ import org.junit.Test;
 import org.redisson.api.RedissonClient;
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -76,7 +75,7 @@ public class RedissonDeviceOperationTest {
         Assert.assertEquals(operation.getState(), DeviceState.online);
 
         //消息处理器
-        RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client, Executors.newFixedThreadPool(6));
+        RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
         handler.handleDeviceCheck("test2-server", deviceId -> {
 
@@ -102,7 +101,7 @@ public class RedissonDeviceOperationTest {
         RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, () -> "test-server", () -> {
         });
 
-        RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client, Executors.newFixedThreadPool(6));
+        RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
 
         AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();

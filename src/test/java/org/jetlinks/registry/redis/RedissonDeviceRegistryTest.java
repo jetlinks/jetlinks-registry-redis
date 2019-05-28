@@ -13,8 +13,6 @@ import org.redisson.api.RedissonClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 
@@ -33,9 +31,7 @@ public class RedissonDeviceRegistryTest {
     public void init() {
         RedissonClient client = RedissonHelper.newRedissonClient();
 
-        ExecutorService service = Executors.newScheduledThreadPool(2);
-
-        messageHandler = new RedissonDeviceMessageHandler(client, service);
+        messageHandler = new RedissonDeviceMessageHandler(client);
         registry = new RedissonDeviceRegistry(RedissonHelper.newRedissonClient(), new MockProtocolSupports());
     }
 
@@ -66,7 +62,12 @@ public class RedissonDeviceRegistryTest {
         productOperation.update(productInfo);
         productOperation.put("test_config", "1234");
         try {
+            Assert.assertNotNull(productOperation.getProtocol());
+
             DeviceOperation operation = registry.registry(info);
+
+            Assert.assertNotNull(operation.getProtocol());
+
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "1234");
             operation.put("test_config", "2345");
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "2345");
