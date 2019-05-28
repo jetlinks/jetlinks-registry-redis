@@ -98,7 +98,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
     public void checkState() {
         String serverId = getServerId();
         if (serverId != null) {
-            String deviceId = getDeviceInfo().getId();
             long subscribes = redissonClient
                     .getTopic("device:state:check:".concat(serverId))
                     .publish(deviceId);
