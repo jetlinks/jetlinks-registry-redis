@@ -10,7 +10,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>jetlinks-registry-redis</artifactId>
-
+    <name>JetLinks Device Registry Redis Implement</name>
+    <description>基于Redis的设备注册中心</description>
 
     <dependencies>
         <dependency>
