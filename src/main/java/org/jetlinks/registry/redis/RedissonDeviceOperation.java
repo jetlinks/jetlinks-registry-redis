@@ -201,7 +201,8 @@ public class RedissonDeviceOperation implements DeviceOperation {
         if (protocol != null) {
             return protocolSupports.getProtocol(protocol);
         } else {
-            return registry.getProduct((String) all.get("productId"))
+
+            return registry.getProduct( (String) all.get("productId"))
                     .getProtocol();
         }
     }
