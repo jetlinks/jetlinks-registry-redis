@@ -13,7 +13,6 @@ import org.redisson.api.RedissonClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -146,14 +145,6 @@ public class RedissonDeviceRegistryTest {
             reply.setMessage("成功");
             messageHandler.reply(reply);
         });
-        CountDownLatch downLatch = new CountDownLatch(1);
-        messageHandler.handleDeviceCheck("test", deviceId -> {
-            log.info("check state:{}",deviceId);
-            downLatch.countDown();
-        });
-
-        operation.checkState();
-        Assert.assertTrue(downLatch.await(20, TimeUnit.SECONDS));
 
         CommonDeviceMessageReply reply = operation.messageSender()
                 .invokeFunction("test")
