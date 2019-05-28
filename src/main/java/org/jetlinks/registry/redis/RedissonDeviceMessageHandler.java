@@ -1,12 +1,14 @@
 package org.jetlinks.registry.redis;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
-import org.redisson.api.*;
-import org.jetlinks.core.device.registry.DeviceMessageHandler;
+import org.redisson.api.RBucket;
+import org.redisson.api.RSemaphore;
+import org.redisson.api.RedissonClient;
+
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -18,11 +20,9 @@ import java.util.function.Consumer;
 public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     private RedissonClient redissonClient;
 
-    private ExecutorService executorService;
 
-    public RedissonDeviceMessageHandler(RedissonClient redissonClient, ExecutorService executorService) {
+    public RedissonDeviceMessageHandler(RedissonClient redissonClient) {
         this.redissonClient = redissonClient;
-        this.executorService = executorService;
     }
 
     @Override
@@ -40,7 +40,9 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     public void handleMessage(String serverId, Consumer<DeviceMessage> deviceMessageConsumer) {
         redissonClient.getTopic("device:message:accept:".concat(serverId))
                 .addListenerAsync(DeviceMessage.class, (channel, message) -> {
-                    log.debug("接收到发往设备的消息:{}", message.toJson());
+                    if (log.isDebugEnabled()) {
+                        log.debug("接收到发往设备的消息:{}", message.toJson());
+                    }
                     deviceMessageConsumer.accept(message);
                 })
                 .thenAccept(id -> log.info("开始接收设备消息"));
@@ -50,8 +52,8 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     public CompletionStage<Boolean> reply(DeviceMessageReply message) {
         RBucket<DeviceMessageReply> bucket = redissonClient.getBucket("device:message:reply:".concat(message.getMessageId()));
         RSemaphore semaphore = redissonClient.getSemaphore("device:reply:".concat(message.getMessageId()));
-        bucket.expire(2, TimeUnit.MINUTES);
-        semaphore.expire(2, TimeUnit.MINUTES);
+        bucket.expireAsync(2, TimeUnit.MINUTES);
+        semaphore.expireAsync(2, TimeUnit.MINUTES);
         return bucket
                 .setAsync(message)
                 .thenApply(nil -> {
@@ -59,9 +61,5 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
                     return true;
                 });
 
-    }
-
-    @Override
-    public void close() {
     }
 }
