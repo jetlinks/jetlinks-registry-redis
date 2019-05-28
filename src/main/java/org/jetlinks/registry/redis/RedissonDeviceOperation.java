@@ -113,7 +113,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 try {
                     boolean success = redissonClient
                             .getSemaphore("device:state:check:semaphore:".concat(deviceId))
-                            .tryAcquire(1, TimeUnit.SECONDS);
+                            .tryAcquire((int)subscribes,1, TimeUnit.SECONDS);
                     if (!success) {
                         log.warn("device state check time out!");
                     }

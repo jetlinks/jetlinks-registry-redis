@@ -13,10 +13,10 @@ import org.redisson.api.RedissonClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /**
@@ -116,7 +116,8 @@ public class RedissonDeviceRegistryTest {
 
         time = System.currentTimeMillis();
         for (DeviceOperation operation : operations) {
-            operation.authenticate(new AuthenticationRequest(){});
+            operation.authenticate(new AuthenticationRequest() {
+            });
             operation.online("server_01", "session_0");
             operation.getDeviceInfo();
         }
@@ -145,13 +146,14 @@ public class RedissonDeviceRegistryTest {
             reply.setMessage("成功");
             messageHandler.reply(reply);
         });
-        AtomicBoolean checked = new AtomicBoolean();
-        messageHandler.handleDeviceCheck("test",deviceId->{
-            checked.set(true);
+        CountDownLatch downLatch = new CountDownLatch(1);
+        messageHandler.handleDeviceCheck("test", deviceId -> {
+            log.info("check state:{}",deviceId);
+            downLatch.countDown();
         });
 
         operation.checkState();
-        Assert.assertTrue(checked.get());
+        Assert.assertTrue(downLatch.await(20, TimeUnit.SECONDS));
 
         CommonDeviceMessageReply reply = operation.messageSender()
                 .invokeFunction("test")
@@ -166,7 +168,7 @@ public class RedissonDeviceRegistryTest {
         long len = 100;
         for (int i = 0; i < len; i++) {
             reply = operation.messageSender()
-                    .invokeFunction( "test")
+                    .invokeFunction("test")
                     .send()
                     .toCompletableFuture()
                     .get(5, TimeUnit.SECONDS);
