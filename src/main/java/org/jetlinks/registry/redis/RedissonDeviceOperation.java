@@ -1,16 +1,15 @@
 package org.jetlinks.registry.redis;
 
 import com.alibaba.fastjson.JSON;
-import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupport;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.*;
+import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
 import org.jetlinks.core.metadata.DeviceMetadata;
 import org.jetlinks.core.metadata.ValueWrapper;
-import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.redisson.api.RFuture;
 import org.redisson.api.RMap;
 import org.redisson.api.RedissonClient;
@@ -47,13 +46,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
         this.registry = registry;
     }
 
-    @Getter
-    private volatile long lastOperationTime = System.currentTimeMillis();
-
-    private void setLastOperationTime() {
-        this.lastOperationTime = System.currentTimeMillis();
-    }
-
     @Override
     public String getDeviceId() {
         return deviceId;
@@ -61,7 +53,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public String getServerId() {
-        setLastOperationTime();
         return Optional.ofNullable(rMap.get("serverId"))
                 .map(String::valueOf)
                 .orElse(null);
@@ -69,7 +60,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public String getSessionId() {
-        setLastOperationTime();
         return Optional.ofNullable(rMap.get("sessionId"))
                 .map(String::valueOf)
                 .orElse(null);
@@ -77,7 +67,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public byte getState() {
-        setLastOperationTime();
         Byte state = (Byte) rMap.get("state");
         return state == null ? DeviceState.unknown : state;
     }
@@ -85,12 +74,10 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     @SneakyThrows
     public void putState(byte state) {
-        setLastOperationTime();
         execute(rMap.fastPutAsync("state", state));
     }
 
     private void execute(RFuture<?> future) {
-        setLastOperationTime();
         try {
             //无论成功失败,最多等待一秒
             future.await(1, TimeUnit.SECONDS);
@@ -134,7 +121,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public long getOnlineTime() {
-        setLastOperationTime();
         return Optional.ofNullable(rMap.get("onlineTime"))
                 .map(Long.class::cast)
                 .orElse(-1L);
@@ -149,7 +135,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void online(String serverId, String sessionId) {
-        setLastOperationTime();
         Map<String, Object> map = new HashMap<>();
         map.put("serverId", serverId);
         map.put("sessionId", sessionId);
@@ -160,7 +145,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void offline() {
-        setLastOperationTime();
         rMap.put("offlineTime", System.currentTimeMillis());
         putState(DeviceState.offline);
         execute(rMap.fastRemoveAsync("serverId", "sessionId"));
@@ -168,13 +152,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
-        setLastOperationTime();
         return getProtocol().authenticate(request, this);
     }
 
     @Override
     public DeviceMetadata getMetadata() {
-        setLastOperationTime();
 
         Map<String, Object> deviceInfo = rMap.getAll(new HashSet<>(Arrays.asList("metadata", "protocol", "productId")));
 
@@ -209,13 +191,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceMessageSender messageSender() {
-        setLastOperationTime();
         return new RedissonDeviceMessageSender(deviceId, redissonClient, this::getServerId, this::checkState);
     }
 
     @Override
     public DeviceInfo getDeviceInfo() {
-        setLastOperationTime();
         Object info = rMap.get("info");
         if (info instanceof String) {
             return JSON.parseObject((String) info, DeviceInfo.class);
@@ -229,7 +209,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void update(DeviceInfo deviceInfo) {
-        setLastOperationTime();
         Map<String, Object> all = new HashMap<>();
         all.put("info", JSON.toJSONString(deviceInfo));
         if (deviceInfo.getProtocol() != null) {
@@ -269,13 +248,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void put(String key, Object value) {
-        setLastOperationTime();
         rMap.fastPut(createConfigKey(key), value);
     }
 
     @Override
     public void putAll(Map<String, Object> conf) {
-        setLastOperationTime();
         Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
@@ -285,7 +262,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void remove(String key) {
-        setLastOperationTime();
         rMap.fastRemove(createConfigKey(key));
     }
 
