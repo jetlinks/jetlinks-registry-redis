@@ -7,14 +7,21 @@ import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
 import org.jetlinks.core.message.RepayableDeviceMessage;
+import org.jetlinks.core.message.exception.FunctionUndefinedException;
+import org.jetlinks.core.message.exception.IllegalParameterException;
+import org.jetlinks.core.message.exception.ParameterUndefinedException;
 import org.jetlinks.core.message.function.FunctionInvokeMessageReply;
 import org.jetlinks.core.message.property.ReadPropertyMessage;
 import org.jetlinks.core.message.property.ReadPropertyMessageReply;
+import org.jetlinks.core.support.JetLinksProtocolSupport;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.redisson.api.RedissonClient;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.StreamUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,7 +35,9 @@ public class RedissonDeviceOperationTest {
 
     @Before
     public void init() {
-        registry = new RedissonDeviceRegistry(client, protocol -> null);
+        JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
+
+        registry = new RedissonDeviceRegistry(client, protocol -> jetLinksProtocolSupport);
 
     }
 
@@ -97,12 +106,11 @@ public class RedissonDeviceOperationTest {
     @Test
     @SneakyThrows
     public void testSendAndReplyMessage() {
-
-        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, () -> "test-server", () -> {
-        });
+        DeviceOperation operation = registry.getDevice("test2");
+        operation.online("test-server", "12");
+        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, operation);
 
         RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
-
 
         AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();
         //处理发往设备的消息
@@ -126,6 +134,72 @@ public class RedissonDeviceOperationTest {
         Assert.assertTrue(messageReference.get() instanceof ReadPropertyMessage);
         Assert.assertNotNull(reply);
 
+    }
+
+
+    @Test
+    @SneakyThrows
+    public void testValidateParameter() {
+        DeviceOperation operation = registry.getDevice("test3");
+        String metaData = StreamUtils.copyToString(new ClassPathResource("testValidateParameter.meta.json").getInputStream(), StandardCharsets.UTF_8);
+        operation.updateMetadata(metaData);
+
+        Assert.assertNotNull(operation.getMetadata());
+
+        //function未定义
+        try {
+            operation.messageSender()
+                    .invokeFunction("getSysInfoUndefined")
+                    .validate();
+            Assert.fail();
+        } catch (FunctionUndefinedException ignore) {
+
+        }
+
+        //参数错误
+        try {
+            operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .validate();
+            Assert.fail();
+        } catch (IllegalArgumentException ignore) {
+
+        }
+
+        //参数未定义
+        try {
+            operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .addParameter("test","123")
+                    .validate();
+            Assert.fail();
+        } catch (ParameterUndefinedException ignore) {
+
+        }
+
+        //参数值类型错误
+        try {
+            operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .addParameter("useCache","2")
+                    .validate();
+            Assert.fail();
+        } catch (IllegalParameterException e) {
+            System.out.println(e.getParameter()+":"+e.getMessage());
+        }
+
+        //通过
+        operation.messageSender()
+                .invokeFunction("getSysInfo")
+                .addParameter("useCache","1")
+                .validate();
+
+        operation.messageSender()
+                .invokeFunction("getSysInfo")
+                .addParameter("useCache","0")
+                .validate();
+
+        registry.unRegistry("test3");
     }
 
 }

@@ -5,8 +5,11 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.device.DeviceMessageSender;
+import org.jetlinks.core.device.DeviceOperation;
 import org.jetlinks.core.enums.ErrorCode;
 import org.jetlinks.core.message.*;
+import org.jetlinks.core.message.exception.FunctionUndefinedException;
+import org.jetlinks.core.message.exception.ParameterUndefinedException;
 import org.jetlinks.core.message.function.FunctionInvokeMessage;
 import org.jetlinks.core.message.function.FunctionInvokeMessageReply;
 import org.jetlinks.core.message.function.FunctionParameter;
@@ -14,18 +17,21 @@ import org.jetlinks.core.message.property.ReadPropertyMessage;
 import org.jetlinks.core.message.property.ReadPropertyMessageReply;
 import org.jetlinks.core.message.property.WritePropertyMessage;
 import org.jetlinks.core.message.property.WritePropertyMessageReply;
+import org.jetlinks.core.metadata.FunctionMetadata;
+import org.jetlinks.core.metadata.PropertyMetadata;
+import org.jetlinks.core.metadata.ValidateResult;
 import org.jetlinks.core.utils.IdUtils;
 import org.redisson.api.RSemaphore;
 import org.redisson.api.RedissonClient;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.jetlinks.core.enums.ErrorCode.NO_REPLY;
 
@@ -44,13 +50,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
     private String deviceId;
 
+    private DeviceOperation operation;
+
     public RedissonDeviceMessageSender(String deviceId,
                                        RedissonClient redissonClient,
-                                       Supplier<String> connectionServerIdSupplier,
-                                       Runnable deviceStateChecker) {
+                                       DeviceOperation operation) {
         this.redissonClient = redissonClient;
-        this.connectionServerIdSupplier = connectionServerIdSupplier;
-        this.deviceStateChecker = deviceStateChecker;
+        this.operation = operation;
+        this.connectionServerIdSupplier = operation::getServerId;
+        this.deviceStateChecker = operation::checkState;
         this.deviceId = deviceId;
     }
 
@@ -135,13 +143,13 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                                 .tryAcquireAsync(deviceConnectedServerNumber.intValue(), maxSendAwaitSeconds, TimeUnit.SECONDS)
                                 .thenCompose(complete -> {
                                     try {
-                                        if (complete) {
-                                            //从redis中获取设备返回的数据
-                                            return redissonClient
-                                                    .getBucket("device:message:reply:".concat(message.getMessageId()))
-                                                    .getAndDeleteAsync();
-                                        }
-                                        return CompletableFuture.completedFuture(null);
+                                        // if (complete) { //无论成功失败都从redis取
+                                        //从redis中获取设备返回的数据
+                                        return redissonClient
+                                                .getBucket("device:message:reply:".concat(message.getMessageId()))
+                                                .getAndDeleteAsync();
+                                        // }
+                                        // return CompletableFuture.completedFuture(null);
                                     } finally {
                                         //删除信号
                                         semaphore.deleteAsync();
@@ -189,6 +197,33 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             @Override
             public FunctionInvokeMessageSender setParameter(List<FunctionParameter> parameter) {
                 invokeMessage.setInputs(parameter);
+                return this;
+            }
+
+            @Override
+            public FunctionInvokeMessageSender validate(BiConsumer<FunctionParameter, ValidateResult> resultConsumer) {
+                //获取功能定义
+                FunctionMetadata functionMetadata = operation.getMetadata().getFunction(function)
+                        .orElseThrow(() -> new FunctionUndefinedException(function, "功能[" + function + "]未定义"));
+                List<PropertyMetadata> metadataInputs = functionMetadata.getInputs();
+                List<FunctionParameter> inputs = invokeMessage.getInputs();
+
+                if (inputs.size() != metadataInputs.size()) {
+
+                    log.warn("调用设备功能[{}]参数数量[需要{},传入{}]错误,功能:{}", function, metadataInputs.size(), inputs.size(), functionMetadata.toString());
+                    throw new IllegalArgumentException("参数数量错误");
+                }
+
+                //参数定义转为map,避免n*n循环
+                Map<String, PropertyMetadata> properties = metadataInputs.stream()
+                        .collect(Collectors.toMap(PropertyMetadata::getId, Function.identity(), (t1, t2) -> t1));
+
+                for (FunctionParameter input : invokeMessage.getInputs()) {
+                    PropertyMetadata metadata = Optional.ofNullable(properties.get(input.getName()))
+                            .orElseThrow(() -> new ParameterUndefinedException(input.getName(), "参数[" + input.getName() + "]未定义"));
+                    resultConsumer.accept(input, metadata.getValueType().validate(input.getValue()));
+                }
+
                 return this;
             }
 

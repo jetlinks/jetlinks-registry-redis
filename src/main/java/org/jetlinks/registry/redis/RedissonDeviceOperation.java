@@ -191,7 +191,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceMessageSender messageSender() {
-        return new RedissonDeviceMessageSender(deviceId, redissonClient, this::getServerId, this::checkState);
+        return new RedissonDeviceMessageSender(deviceId, redissonClient,this);
     }
 
     @Override

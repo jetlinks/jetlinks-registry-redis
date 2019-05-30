@@ -1,0 +1,23 @@
+{
+  "id": "test",
+  "name": "测试",
+  "functions": [
+    {
+      "id": "getSysInfo",
+      "name": "获取系统信息",
+      "inputs": [
+        {
+          "id": "useCache",
+          "name": "是否使用缓存",
+          "valueType": {
+            "type": "boolean",
+            "trueValue": 1,
+            "falseValue": 0,
+            "trueText": "开启",
+            "falseText": "关闭"
+          }
+        }
+      ]
+    }
+  ]
+}
