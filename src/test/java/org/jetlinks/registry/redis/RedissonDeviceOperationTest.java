@@ -4,6 +4,7 @@ import lombok.SneakyThrows;
 import org.jetlinks.core.device.DeviceOperation;
 import org.jetlinks.core.device.DeviceState;
 import org.jetlinks.core.device.registry.DeviceRegistry;
+import org.jetlinks.core.enums.ErrorCode;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
 import org.jetlinks.core.message.RepayableDeviceMessage;
@@ -24,7 +25,10 @@ import org.springframework.util.StreamUtils;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static io.vavr.API.Try;
 
 public class RedissonDeviceOperationTest {
 
@@ -56,9 +60,9 @@ public class RedissonDeviceOperationTest {
         //模拟发送一条消息，该设备实际上并不在线。应该会自动执行状态检查
         FunctionInvokeMessageReply reply = operation.messageSender()
                 .invokeFunction("test")
-                .send()
-                .toCompletableFuture()
-                .get(10, TimeUnit.SECONDS);
+                .trySend(10, TimeUnit.SECONDS)
+                .recoverWith(TimeoutException.class, (__) -> FunctionInvokeMessageReply.failureTry(ErrorCode.TIME_OUT))
+                .get();
 
         Assert.assertFalse(reply.isSuccess());
 
@@ -147,56 +151,48 @@ public class RedissonDeviceOperationTest {
         Assert.assertNotNull(operation.getMetadata());
 
         //function未定义
-        try {
-            operation.messageSender()
-                    .invokeFunction("getSysInfoUndefined")
-                    .validate();
-            Assert.fail();
-        } catch (FunctionUndefinedException ignore) {
 
-        }
-
+        Assert.assertTrue(Try(() -> operation.messageSender().invokeFunction("getSysInfoUndefined").validate())
+                .map(r -> false)
+                .recover(FunctionUndefinedException.class, true)
+                .recover(err -> false)
+                .get());
         //参数错误
-        try {
-            operation.messageSender()
-                    .invokeFunction("getSysInfo")
-                    .validate();
-            Assert.fail();
-        } catch (IllegalArgumentException ignore) {
-
-        }
+        Assert.assertTrue(Try(() -> operation.messageSender().invokeFunction("getSysInfo").validate())
+                .map(r -> false)
+                .recover(IllegalArgumentException.class, true)
+                .recover(err -> false)
+                .get());
 
         //参数未定义
-        try {
-            operation.messageSender()
-                    .invokeFunction("getSysInfo")
-                    .addParameter("test","123")
-                    .validate();
-            Assert.fail();
-        } catch (ParameterUndefinedException ignore) {
-
-        }
+        Assert.assertTrue(Try(() -> operation.messageSender()
+                .invokeFunction("getSysInfo")
+                .addParameter("test", "123")
+                .validate())
+                .map(r -> false)
+                .recover(ParameterUndefinedException.class, true)
+                .recover(err -> false)
+                .get());
 
         //参数值类型错误
-        try {
-            operation.messageSender()
-                    .invokeFunction("getSysInfo")
-                    .addParameter("useCache","2")
-                    .validate();
-            Assert.fail();
-        } catch (IllegalParameterException e) {
-            System.out.println(e.getParameter()+":"+e.getMessage());
-        }
+        Assert.assertTrue(Try(() -> operation.messageSender()
+                .invokeFunction("getSysInfo")
+                .addParameter("useCache", "2")
+                .validate())
+                .map(r -> false)
+                .recover(IllegalParameterException.class, true)
+                .recover(err -> false)
+                .get());
 
         //通过
         operation.messageSender()
                 .invokeFunction("getSysInfo")
-                .addParameter("useCache","1")
+                .addParameter("useCache", "1")
                 .validate();
 
         operation.messageSender()
                 .invokeFunction("getSysInfo")
-                .addParameter("useCache","0")
+                .addParameter("useCache", "0")
                 .validate();
 
         registry.unRegistry("test3");
