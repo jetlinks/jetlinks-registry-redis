@@ -42,7 +42,6 @@ public class RedissonDeviceOperationTest {
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
         registry = new RedissonDeviceRegistry(client, protocol -> jetLinksProtocolSupport);
-
     }
 
     //设备网关服务宕机
@@ -50,24 +49,28 @@ public class RedissonDeviceOperationTest {
     @Test
     @SneakyThrows
     public void testServerOfflineCheckState() {
-
         DeviceOperation operation = registry.getDevice("test2");
-        //模拟上线
-        operation.online("test2-server", "test");
 
-        Assert.assertEquals(operation.getState(), DeviceState.online);
+        try {
+            //模拟上线
+            operation.online("test2-server", "test");
 
-        //模拟发送一条消息，该设备实际上并不在线。应该会自动执行状态检查
-        FunctionInvokeMessageReply reply = operation.messageSender()
-                .invokeFunction("test")
-                .trySend(10, TimeUnit.SECONDS)
-                .recoverWith(TimeoutException.class, (__) -> FunctionInvokeMessageReply.failureTry(ErrorCode.TIME_OUT))
-                .get();
+            Assert.assertEquals(operation.getState(), DeviceState.online);
 
-        Assert.assertFalse(reply.isSuccess());
+            //模拟发送一条消息，该设备实际上并不在线。应该会自动执行状态检查
+            FunctionInvokeMessageReply reply = operation.messageSender()
+                    .invokeFunction("test")
+                    .trySend(10, TimeUnit.SECONDS)
+                    .recoverWith(TimeoutException.class, (__) -> FunctionInvokeMessageReply.failureTry(ErrorCode.TIME_OUT))
+                    .get();
 
-        //调用了设备状态检查并自动更新了设备状态
-        Assert.assertEquals(operation.getState(), DeviceState.offline);
+            Assert.assertFalse(reply.isSuccess());
+
+            //调用了设备状态检查并自动更新了设备状态
+            Assert.assertEquals(operation.getState(), DeviceState.offline);
+        } finally {
+            registry.unRegistry("test2");
+        }
 
     }
 
@@ -78,65 +81,72 @@ public class RedissonDeviceOperationTest {
     @SneakyThrows
     public void testServerOnlineNotConnectCheckState() {
 
-        CountDownLatch latch = new CountDownLatch(1);
+        try {
+            CountDownLatch latch = new CountDownLatch(1);
 
 
-        DeviceOperation operation = registry.getDevice("test2");
-        //模拟上线
-        operation.online("test2-server", "test");
+            DeviceOperation operation = registry.getDevice("test2");
+            //模拟上线
+            operation.online("test2-server", "test");
 
-        Assert.assertEquals(operation.getState(), DeviceState.online);
+            Assert.assertEquals(operation.getState(), DeviceState.online);
 
-        //消息处理器
-        RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
+            //消息处理器
+            RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
-        handler.handleDeviceCheck("test2-server", deviceId -> {
+            handler.handleDeviceCheck("test2-server", deviceId -> {
 
-            //模拟设备并没有连接到本服务器,修改设备状态离线.
-            operation.offline();
-            latch.countDown();
+                //模拟设备并没有连接到本服务器,修改设备状态离线.
+                operation.offline();
+                latch.countDown();
 
-        });
+            });
 
-        //主动调用设备状态检查
-        operation.checkState();
+            //主动调用设备状态检查
+            operation.checkState();
 
-        //调用了设备状态检查
-        Assert.assertTrue(latch.await(10, TimeUnit.SECONDS));
-        Assert.assertEquals(operation.getState(), DeviceState.offline);
-
+            //调用了设备状态检查
+            Assert.assertTrue(latch.await(10, TimeUnit.SECONDS));
+            Assert.assertEquals(operation.getState(), DeviceState.offline);
+        } finally {
+            registry.unRegistry("test2");
+        }
     }
 
     @Test
     @SneakyThrows
     public void testSendAndReplyMessage() {
-        DeviceOperation operation = registry.getDevice("test2");
-        operation.online("test-server", "12");
-        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, operation);
+        try {
+            DeviceOperation operation = registry.getDevice("test2");
+            operation.online("test-server", "12");
+            RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, operation);
 
-        RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
+            RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
-        AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();
-        //处理发往设备的消息
-        handler.handleMessage("test-server", message -> {
-            messageReference.set(message);
+            AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();
+            //处理发往设备的消息
+            handler.handleMessage("test-server", message -> {
+                messageReference.set(message);
 
-            if (message instanceof RepayableDeviceMessage) {
-                //模拟设备回复消息
-                DeviceMessageReply reply = ((RepayableDeviceMessage) message).newReply();
-                reply.from(message);
-                handler.reply(reply);
-            }
+                if (message instanceof RepayableDeviceMessage) {
+                    //模拟设备回复消息
+                    DeviceMessageReply reply = ((RepayableDeviceMessage) message).newReply();
+                    reply.from(message);
+                    handler.reply(reply);
+                }
 
-        });
-        //发送消息s
-        ReadPropertyMessageReply reply = sender.readProperty("test")
-                .send()
-                .toCompletableFuture()
-                .get(10, TimeUnit.SECONDS);
-        Assert.assertNotNull(messageReference.get());
-        Assert.assertTrue(messageReference.get() instanceof ReadPropertyMessage);
-        Assert.assertNotNull(reply);
+            });
+            //发送消息s
+            ReadPropertyMessageReply reply = sender.readProperty("test")
+                    .send()
+                    .toCompletableFuture()
+                    .get(10, TimeUnit.SECONDS);
+            Assert.assertNotNull(messageReference.get());
+            Assert.assertTrue(messageReference.get() instanceof ReadPropertyMessage);
+            Assert.assertNotNull(reply);
+        } finally {
+            registry.unRegistry("test2");
+        }
 
     }
 
@@ -144,6 +154,7 @@ public class RedissonDeviceOperationTest {
     @Test
     @SneakyThrows
     public void testValidateParameter() {
+        try{
         DeviceOperation operation = registry.getDevice("test3");
         String metaData = StreamUtils.copyToString(new ClassPathResource("testValidateParameter.meta.json").getInputStream(), StandardCharsets.UTF_8);
         operation.updateMetadata(metaData);
@@ -194,8 +205,9 @@ public class RedissonDeviceOperationTest {
                 .invokeFunction("getSysInfo")
                 .addParameter("useCache", "0")
                 .validate();
-
-        registry.unRegistry("test3");
+        } finally {
+            registry.unRegistry("test3");
+        }
     }
 
 }
