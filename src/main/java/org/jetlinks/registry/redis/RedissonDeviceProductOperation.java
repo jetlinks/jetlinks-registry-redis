@@ -14,6 +14,7 @@ import org.redisson.api.RMap;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author zhouhao
@@ -24,11 +25,25 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     private RMap<String, Object> rMap;
 
+    private Map<String, Object> localCache = new ConcurrentHashMap<>(32);
+
+
     private ProtocolSupports protocolSupports;
 
-    public RedissonDeviceProductOperation(RMap<String, Object> rMap, ProtocolSupports protocolSupports) {
+    private Runnable cacheChangedListener;
+
+
+    public RedissonDeviceProductOperation(RMap<String, Object> rMap, ProtocolSupports protocolSupports, Runnable cacheChangedListener) {
         this.rMap = rMap;
         this.protocolSupports = protocolSupports;
+        this.cacheChangedListener = () -> {
+            localCache.clear();
+            cacheChangedListener.run();
+        };
+    }
+
+    void clearCache() {
+        localCache.clear();
     }
 
     @Override
@@ -66,12 +81,12 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
             all.put("protocol", info.getProtocol());
         }
         rMap.putAll(all);
+        cacheChangedListener.run();
     }
 
     @Override
     public ProtocolSupport getProtocol() {
-        String protocol = (String) rMap.get("protocol");
-        return protocolSupports.getProtocol(protocol);
+        return protocolSupports.getProtocol((String) rMap.computeIfAbsent("protocol", rMap::get));
     }
 
     private String buildConfigKey(String key) {
@@ -80,7 +95,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public ValueWrapper get(String key) {
-        Object conf = rMap.get(buildConfigKey(key));
+        Object conf = localCache.computeIfAbsent(buildConfigKey(key), rMap::get);
         if (null == conf) {
             return NullValueWrapper.instance;
         }
@@ -94,15 +109,18 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
             newMap.put(buildConfigKey(entry.getKey()), entry.getValue());
         }
         rMap.putAll(newMap);
+        cacheChangedListener.run();
     }
 
     @Override
     public void put(String key, Object value) {
         rMap.fastPut(buildConfigKey(key), value);
+        cacheChangedListener.run();
     }
 
     @Override
     public void remove(String key) {
         rMap.fastRemove(buildConfigKey(key));
+        cacheChangedListener.run();
     }
 }

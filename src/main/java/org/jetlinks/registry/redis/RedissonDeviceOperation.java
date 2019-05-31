@@ -9,12 +9,14 @@ import org.jetlinks.core.device.*;
 import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
 import org.jetlinks.core.metadata.DeviceMetadata;
+import org.jetlinks.core.metadata.NullValueWrapper;
 import org.jetlinks.core.metadata.ValueWrapper;
 import org.redisson.api.RFuture;
 import org.redisson.api.RMap;
 import org.redisson.api.RedissonClient;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -28,24 +30,36 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     private RMap<String, Object> rMap;
 
+    private Map<String, Object> localCache = new ConcurrentHashMap<>(32);
+
     private ProtocolSupports protocolSupports;
 
     private DeviceRegistry registry;
 
     private String deviceId;
 
+    private Runnable changedListener;
+
     public RedissonDeviceOperation(String deviceId,
                                    RedissonClient redissonClient,
                                    RMap<String, Object> rMap,
                                    ProtocolSupports protocolSupports,
-                                   DeviceRegistry registry) {
+                                   DeviceRegistry registry,
+                                   Runnable changedListener) {
         this.deviceId = deviceId;
         this.redissonClient = redissonClient;
         this.rMap = rMap;
         this.protocolSupports = protocolSupports;
         this.registry = registry;
+        this.changedListener = () -> {
+            localCache.clear();
+            changedListener.run();
+        };
     }
 
+     void clearCache(){
+         localCache.clear();
+    }
     @Override
     public String getDeviceId() {
         return deviceId;
@@ -53,21 +67,17 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public String getServerId() {
-        return Optional.ofNullable(rMap.get("serverId"))
-                .map(String::valueOf)
-                .orElse(null);
+        return (String) localCache.computeIfAbsent("serverId", rMap::get);
     }
 
     @Override
     public String getSessionId() {
-        return Optional.ofNullable(rMap.get("sessionId"))
-                .map(String::valueOf)
-                .orElse(null);
+        return (String) localCache.computeIfAbsent("sessionId", rMap::get);
     }
 
     @Override
     public byte getState() {
-        Byte state = (Byte) rMap.get("state");
+        Byte state = (Byte) localCache.computeIfAbsent("state", rMap::get);
         return state == null ? DeviceState.unknown : state;
     }
 
@@ -75,6 +85,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @SneakyThrows
     public void putState(byte state) {
         execute(rMap.fastPutAsync("state", state));
+        changedListener.run();
     }
 
     private void execute(RFuture<?> future) {
@@ -141,6 +152,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
         map.put("state", DeviceState.online);
         map.put("onlineTime", System.currentTimeMillis());
         execute(rMap.putAllAsync(map));
+        changedListener.run();
     }
 
     @Override
@@ -148,6 +160,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
         rMap.put("offlineTime", System.currentTimeMillis());
         putState(DeviceState.offline);
         execute(rMap.fastRemoveAsync("serverId", "sessionId"));
+        changedListener.run();
     }
 
     @Override
@@ -174,24 +187,25 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 .decode(metaJson);
     }
 
+    private String getProductId() {
+        return (String) localCache.computeIfAbsent("productId", rMap::get);
+    }
+
     @Override
     public ProtocolSupport getProtocol() {
 
-        Map<String, Object> all = rMap.getAll(new HashSet<>(Arrays.asList("protocol", "productId")));
-        String protocol = (String) all.get("protocol");
+        String protocol = (String) localCache.computeIfAbsent("protocol", rMap::get);
 
         if (protocol != null) {
             return protocolSupports.getProtocol(protocol);
         } else {
-
-            return registry.getProduct( (String) all.get("productId"))
-                    .getProtocol();
+            return registry.getProduct(getProductId()).getProtocol();
         }
     }
 
     @Override
     public DeviceMessageSender messageSender() {
-        return new RedissonDeviceMessageSender(deviceId, redissonClient,this);
+        return new RedissonDeviceMessageSender(deviceId, redissonClient, this);
     }
 
     @Override
@@ -218,10 +232,12 @@ public class RedissonDeviceOperation implements DeviceOperation {
             all.put("productId", deviceInfo.getProductId());
         }
         execute(rMap.putAllAsync(all));
+        changedListener.run();
     }
 
     @Override
     public void updateMetadata(String metadata) {
+        changedListener.run();
         rMap.fastPut("metadata", metadata);
     }
 
@@ -232,23 +248,26 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public ValueWrapper get(String key) {
         String confKey = createConfigKey(key);
+        Object val = localCache.computeIfAbsent(confKey, rMap::get);
 
-        Map<String, Object> conf = rMap.getAll(new HashSet<>(Arrays.asList(confKey, "productId")));
-        String val = (String) conf.get(confKey);
-        String productId = (String) conf.get("productId");
-
-        if (null == val && null != productId) {
-            //获取产品的配置
-            return registry
-                    .getProduct(productId)
-                    .get(key);
+        if (val == null) {
+            String productId = (String) rMap.get("productId");
+            if (null != productId) {
+                //获取产品的配置
+                return registry
+                        .getProduct(productId)
+                        .get(key);
+            }
+            return NullValueWrapper.instance;
         }
+
         return new DefaultValueWrapper(val);
     }
 
     @Override
     public void put(String key, Object value) {
         rMap.fastPut(createConfigKey(key), value);
+        changedListener.run();
     }
 
     @Override
@@ -258,14 +277,17 @@ public class RedissonDeviceOperation implements DeviceOperation {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
         rMap.putAll(newMap);
+        changedListener.run();
     }
 
     @Override
     public void remove(String key) {
+        changedListener.run();
         rMap.fastRemove(createConfigKey(key));
     }
 
     public void delete() {
+        changedListener.run();
         rMap.delete();
     }
 
