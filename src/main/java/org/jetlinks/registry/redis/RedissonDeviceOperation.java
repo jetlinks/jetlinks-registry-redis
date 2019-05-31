@@ -110,6 +110,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
             if (subscribes <= 0) {
                 //没有任何服务在监听话题，则认为服务已经不可用
                 if (getState() == DeviceState.online) {
+                    log.debug("设备网关服务[{}]未正常运行,设备[{}]下线", serverId, deviceId);
                     offline();
                 }
             } else {
@@ -122,14 +123,14 @@ public class RedissonDeviceOperation implements DeviceOperation {
                     boolean success = semaphore.tryAcquire((int) subscribes, 2, TimeUnit.SECONDS);
                     semaphore.deleteAsync();
                     if (!success) {
-                        log.warn("device state check time out!");
+                        log.warn("设备[{}]状态检查超时,设备网关服务:[{}]", deviceId, serverId);
                     }
-                } catch (InterruptedException e) {
-                    log.warn("wait check device state error", e);
+                } catch (InterruptedException ignore) {
                 }
             }
         } else {
             if (getState() == DeviceState.online) {
+                log.debug("设备[{}]未注册到任何设备网关服务", deviceId);
                 offline();
             }
         }

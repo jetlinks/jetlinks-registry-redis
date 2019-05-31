@@ -34,7 +34,6 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
                             .getSemaphore("device:state:check:semaphore:".concat(msg));
                     semaphore.expireAsync(5, TimeUnit.SECONDS)
                             .thenRun(semaphore::releaseAsync);
-
                 });
     }
 
