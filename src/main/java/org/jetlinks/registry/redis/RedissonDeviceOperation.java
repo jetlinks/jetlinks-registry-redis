@@ -70,12 +70,20 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public String getServerId() {
-        return (String) localCache.computeIfAbsent("serverId", rMap::get);
+        String serverId = (String) localCache.computeIfAbsent("serverId", rMap::get);
+        if (serverId == null || serverId.isEmpty()) {
+            return null;
+        }
+        return serverId;
     }
 
     @Override
     public String getSessionId() {
-        return (String) localCache.computeIfAbsent("sessionId", rMap::get);
+        String sessionId = (String) localCache.computeIfAbsent("sessionId", rMap::get);
+        if (sessionId == null || sessionId.isEmpty()) {
+            return null;
+        }
+        return sessionId;
     }
 
     @Override
@@ -163,9 +171,13 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void offline() {
-        rMap.put("offlineTime", System.currentTimeMillis());
-        putState(DeviceState.offline);
-        execute(rMap.fastRemoveAsync("serverId", "sessionId"));
+        Map<String, Object> map = new HashMap<>();
+        map.put("state", DeviceState.offline);
+        map.put("offlineTime", System.currentTimeMillis());
+        map.put("serverId", "");
+        map.put("sessionId", "");
+
+        execute(rMap.putAllAsync(map));
         changedListener.run();
     }
 

@@ -68,6 +68,7 @@ public class RedissonDeviceOperationTest {
 
             //调用了设备状态检查并自动更新了设备状态
             Assert.assertEquals(operation.getState(), DeviceState.offline);
+            Assert.assertNull(operation.getServerId());
         } finally {
             registry.unRegistry("test2");
         }

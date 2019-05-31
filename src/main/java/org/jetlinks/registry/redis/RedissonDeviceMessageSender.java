@@ -234,6 +234,12 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
+            public FunctionInvokeMessageSender sync() {
+                invokeMessage.setAsync(false);
+                return this;
+            }
+
+            @Override
             public CompletionStage<FunctionInvokeMessageReply> send() {
                 return RedissonDeviceMessageSender.this.send(invokeMessage);
             }
