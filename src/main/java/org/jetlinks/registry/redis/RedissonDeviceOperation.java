@@ -13,6 +13,7 @@ import org.jetlinks.core.metadata.NullValueWrapper;
 import org.jetlinks.core.metadata.ValueWrapper;
 import org.redisson.api.RFuture;
 import org.redisson.api.RMap;
+import org.redisson.api.RSemaphore;
 import org.redisson.api.RedissonClient;
 
 import java.util.*;
@@ -52,18 +53,20 @@ public class RedissonDeviceOperation implements DeviceOperation {
         this.protocolSupports = protocolSupports;
         this.registry = registry;
         this.changedListener = () -> {
-            localCache.clear();
+            clearCache();
             changedListener.run();
         };
     }
 
-     void clearCache(){
-         localCache.clear();
+    void clearCache() {
+        localCache.clear();
     }
+
     @Override
     public String getDeviceId() {
         return deviceId;
     }
+
 
     @Override
     public String getServerId() {
@@ -113,9 +116,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 //等待检查返回,检查是异步的,需要等待检查完成的信号
                 //一般检查速度很快,所以这里超过2秒则超时,继续执行接下来的逻辑
                 try {
-                    boolean success = redissonClient
-                            .getSemaphore("device:state:check:semaphore:".concat(deviceId))
-                            .tryAcquire((int) subscribes, 2, TimeUnit.SECONDS);
+                    RSemaphore semaphore = redissonClient
+                            .getSemaphore("device:state:check:semaphore:".concat(deviceId));
+                    semaphore.expireAsync(5, TimeUnit.SECONDS);
+                    boolean success = semaphore.tryAcquire((int) subscribes, 2, TimeUnit.SECONDS);
+                    semaphore.deleteAsync();
                     if (!success) {
                         log.warn("device state check time out!");
                     }

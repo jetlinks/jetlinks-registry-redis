@@ -30,9 +30,11 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
         redissonClient.getTopic("device:state:check:".concat(serviceId))
                 .addListenerAsync(String.class, (channel, msg) -> {
                     consumer.accept(msg);
-                    redissonClient
-                            .getSemaphore("device:state:check:semaphore:".concat(msg))
-                            .releaseAsync();
+                    RSemaphore semaphore = redissonClient
+                            .getSemaphore("device:state:check:semaphore:".concat(msg));
+                    semaphore.expireAsync(5, TimeUnit.SECONDS)
+                            .thenRun(semaphore::releaseAsync);
+
                 });
     }
 
