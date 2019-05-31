@@ -124,6 +124,9 @@ public class RedissonDeviceOperationTest {
 
             RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
+            handler.markMessageAsync("testId");
+            Assert.assertTrue(handler.messageIsAsync("testId"));
+
             AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();
             //处理发往设备的消息
             handler.handleMessage("test-server", message -> {

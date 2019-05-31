@@ -17,6 +17,7 @@ import org.redisson.api.RSemaphore;
 import org.redisson.api.RedissonClient;
 
 import java.util.*;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -182,7 +183,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
-    public AuthenticationResponse authenticate(AuthenticationRequest request) {
+    public CompletionStage<AuthenticationResponse> authenticate(AuthenticationRequest request) {
         return getProtocol().authenticate(request, this);
     }
 
@@ -304,7 +305,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
         rMap.fastRemove(createConfigKey(key));
     }
 
-    public void delete() {
+    void delete() {
         changedListener.run();
         rMap.delete();
     }

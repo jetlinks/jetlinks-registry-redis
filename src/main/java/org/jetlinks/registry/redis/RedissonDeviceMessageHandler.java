@@ -63,4 +63,17 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
                 });
 
     }
+
+    @Override
+    public void markMessageAsync(String messageId) {
+        RBucket<Boolean> bucket = redissonClient.getBucket("async-msg:".concat(messageId));
+        bucket.set(true);
+        bucket.expireAsync(10, TimeUnit.MINUTES);
+    }
+
+    @Override
+    public boolean messageIsAsync(String messageId) {
+        RBucket<Boolean> bucket = redissonClient.getBucket("async-msg:".concat(messageId));
+        return Boolean.TRUE.equals(bucket.getAndDelete());
+    }
 }

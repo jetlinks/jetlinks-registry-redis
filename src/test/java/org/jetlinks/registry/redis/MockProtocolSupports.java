@@ -15,6 +15,8 @@ import org.jetlinks.core.metadata.DeviceMetadataCodec;
 
 import javax.annotation.Nonnull;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 /**
  * @author zhouhao
@@ -70,8 +72,8 @@ public class MockProtocolSupports implements ProtocolSupports {
 
             @Override
             @Nonnull
-            public AuthenticationResponse authenticate(@Nonnull AuthenticationRequest request, @Nonnull DeviceOperation deviceOperation) {
-                return AuthenticationResponse.success();
+            public CompletionStage<AuthenticationResponse> authenticate(@Nonnull AuthenticationRequest request, @Nonnull DeviceOperation deviceOperation) {
+                return CompletableFuture.completedFuture(AuthenticationResponse.success());
             }
         };
     }
