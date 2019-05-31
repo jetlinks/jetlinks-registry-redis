@@ -27,8 +27,9 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
 
     @Override
     public void handleDeviceCheck(String serviceId, Consumer<String> consumer) {
-        redissonClient.getTopic("device:state:check:".concat(serviceId))
-                .addListenerAsync(String.class, (channel, msg) -> {
+        redissonClient
+                .getTopic("device:state:check:".concat(serviceId))
+                .addListener(String.class, (channel, msg) -> {
                     consumer.accept(msg);
                     RSemaphore semaphore = redissonClient
                             .getSemaphore("device:state:check:semaphore:".concat(msg));
@@ -40,13 +41,12 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     @Override
     public void handleMessage(String serverId, Consumer<DeviceMessage> deviceMessageConsumer) {
         redissonClient.getTopic("device:message:accept:".concat(serverId))
-                .addListenerAsync(DeviceMessage.class, (channel, message) -> {
+                .addListener(DeviceMessage.class, (channel, message) -> {
                     if (log.isDebugEnabled()) {
                         log.debug("接收到发往设备的消息:{}", message.toJson());
                     }
                     deviceMessageConsumer.accept(message);
-                })
-                .thenAccept(id -> log.info("开始接收设备消息"));
+                });
     }
 
     @Override
