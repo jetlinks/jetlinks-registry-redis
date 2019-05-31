@@ -123,7 +123,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
                     boolean success = semaphore.tryAcquire((int) subscribes, 2, TimeUnit.SECONDS);
                     semaphore.deleteAsync();
                     if (!success) {
-                        log.warn("设备[{}]状态检查超时,设备网关服务:[{}]", deviceId, serverId);
+                        log.debug("设备[{}]状态检查超时,设备网关服务:[{}]", deviceId, serverId);
                     }
                 } catch (InterruptedException ignore) {
                 }
