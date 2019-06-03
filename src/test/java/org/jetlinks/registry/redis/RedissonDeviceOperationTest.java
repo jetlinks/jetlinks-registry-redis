@@ -133,21 +133,46 @@ public class RedissonDeviceOperationTest {
                 messageReference.set(message);
 
                 if (message instanceof RepayableDeviceMessage) {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (Exception e) {
+
+                    }
                     //模拟设备回复消息
                     DeviceMessageReply reply = ((RepayableDeviceMessage) message).newReply();
                     reply.from(message);
+                    reply.error(ErrorCode.REQUEST_HANDLING);
                     handler.reply(reply);
                 }
 
             });
             //发送消息s
             ReadPropertyMessageReply reply = sender.readProperty("test")
+                    .messageId("test-message")
                     .send()
                     .toCompletableFuture()
                     .get(10, TimeUnit.SECONDS);
             Assert.assertNotNull(messageReference.get());
             Assert.assertTrue(messageReference.get() instanceof ReadPropertyMessage);
             Assert.assertNotNull(reply);
+
+            messageReference.set(null);
+
+            sender.readProperty("test")
+                    .messageId("test-retrieve-msg")
+                    .trySend(1, TimeUnit.MILLISECONDS);
+
+            TimeUnit.SECONDS.sleep(5);
+            ReadPropertyMessageReply retrieve =   sender.readProperty("test")
+                    .messageId("test-retrieve-msg")
+                    .retrieveReply()
+                    .toCompletableFuture()
+                    .get(1, TimeUnit.SECONDS);
+            Assert.assertNotNull(messageReference.get());
+            Assert.assertNotNull(retrieve);
+            Assert.assertEquals(retrieve.getCode(), ErrorCode.REQUEST_HANDLING.name());
+            System.out.println(retrieve);
+
         } finally {
             registry.unRegistry("test2");
         }
@@ -158,57 +183,57 @@ public class RedissonDeviceOperationTest {
     @Test
     @SneakyThrows
     public void testValidateParameter() {
-        try{
-        DeviceOperation operation = registry.getDevice("test3");
-        String metaData = StreamUtils.copyToString(new ClassPathResource("testValidateParameter.meta.json").getInputStream(), StandardCharsets.UTF_8);
-        operation.updateMetadata(metaData);
+        try {
+            DeviceOperation operation = registry.getDevice("test3");
+            String metaData = StreamUtils.copyToString(new ClassPathResource("testValidateParameter.meta.json").getInputStream(), StandardCharsets.UTF_8);
+            operation.updateMetadata(metaData);
 
-        Assert.assertNotNull(operation.getMetadata());
+            Assert.assertNotNull(operation.getMetadata());
 
-        //function未定义
+            //function未定义
 
-        Assert.assertTrue(Try(() -> operation.messageSender().invokeFunction("getSysInfoUndefined").validate())
-                .map(r -> false)
-                .recover(FunctionUndefinedException.class, true)
-                .recover(err -> false)
-                .get());
-        //参数错误
-        Assert.assertTrue(Try(() -> operation.messageSender().invokeFunction("getSysInfo").validate())
-                .map(r -> false)
-                .recover(IllegalArgumentException.class, true)
-                .recover(err -> false)
-                .get());
+            Assert.assertTrue(Try(() -> operation.messageSender().invokeFunction("getSysInfoUndefined").validate())
+                    .map(r -> false)
+                    .recover(FunctionUndefinedException.class, true)
+                    .recover(err -> false)
+                    .get());
+            //参数错误
+            Assert.assertTrue(Try(() -> operation.messageSender().invokeFunction("getSysInfo").validate())
+                    .map(r -> false)
+                    .recover(IllegalArgumentException.class, true)
+                    .recover(err -> false)
+                    .get());
 
-        //参数未定义
-        Assert.assertTrue(Try(() -> operation.messageSender()
-                .invokeFunction("getSysInfo")
-                .addParameter("test", "123")
-                .validate())
-                .map(r -> false)
-                .recover(ParameterUndefinedException.class, true)
-                .recover(err -> false)
-                .get());
+            //参数未定义
+            Assert.assertTrue(Try(() -> operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .addParameter("test", "123")
+                    .validate())
+                    .map(r -> false)
+                    .recover(ParameterUndefinedException.class, true)
+                    .recover(err -> false)
+                    .get());
 
-        //参数值类型错误
-        Assert.assertTrue(Try(() -> operation.messageSender()
-                .invokeFunction("getSysInfo")
-                .addParameter("useCache", "2")
-                .validate())
-                .map(r -> false)
-                .recover(IllegalParameterException.class, true)
-                .recover(err -> false)
-                .get());
+            //参数值类型错误
+            Assert.assertTrue(Try(() -> operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .addParameter("useCache", "2")
+                    .validate())
+                    .map(r -> false)
+                    .recover(IllegalParameterException.class, true)
+                    .recover(err -> false)
+                    .get());
 
-        //通过
-        operation.messageSender()
-                .invokeFunction("getSysInfo")
-                .addParameter("useCache", "1")
-                .validate();
+            //通过
+            operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .addParameter("useCache", "1")
+                    .validate();
 
-        operation.messageSender()
-                .invokeFunction("getSysInfo")
-                .addParameter("useCache", "0")
-                .validate();
+            operation.messageSender()
+                    .invokeFunction("getSysInfo")
+                    .addParameter("useCache", "0")
+                    .validate();
         } finally {
             registry.unRegistry("test3");
         }

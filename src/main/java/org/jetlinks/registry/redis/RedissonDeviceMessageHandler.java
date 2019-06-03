@@ -20,6 +20,7 @@ import java.util.function.Consumer;
 public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     private RedissonClient redissonClient;
 
+    private int replyExpireTime = 2;
 
     public RedissonDeviceMessageHandler(RedissonClient redissonClient) {
         this.redissonClient = redissonClient;

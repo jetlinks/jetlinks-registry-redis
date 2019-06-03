@@ -75,19 +75,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
         } else if (deviceReply instanceof ErrorCode) {
             reply.error((ErrorCode) deviceReply);
         } else {
-            try {
-                if (reply.getClass().isAssignableFrom(deviceReply.getClass())) {
-                    return reply = (R) deviceReply;
-                } else if (deviceReply instanceof String) {
-                    reply.fromJson(JSON.parseObject(String.valueOf(deviceReply)));
-                } else if (deviceReply instanceof DeviceMessage) {
-                    reply.fromJson(((DeviceMessage) deviceReply).toJson());
-                } else {
-                    reply.error(ErrorCode.UNSUPPORTED_MESSAGE);
-                    log.warn("不支持的消息类型:{}", deviceReply.getClass());
-                }
-            } finally {
-                log.debug("收到设备回复消息[{}]<={}", reply.getDeviceId(), reply);
+            if (reply.getClass().isAssignableFrom(deviceReply.getClass())) {
+                return reply = (R) deviceReply;
+            } else if (deviceReply instanceof String) {
+                reply.fromJson(JSON.parseObject(String.valueOf(deviceReply)));
+            } else if (deviceReply instanceof DeviceMessage) {
+                reply.fromJson(((DeviceMessage) deviceReply).toJson());
+            } else {
+                reply.error(ErrorCode.UNSUPPORTED_MESSAGE);
+                log.warn("不支持的消息类型:{}", deviceReply.getClass());
             }
         }
         if (message != null) {
@@ -96,11 +92,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
         return reply;
     }
 
-    public <R extends DeviceMessageReply> CompletionStage<R> retrieveReply(String deviceId, String messageId, Supplier<R> replyNewInstance) {
+    public <R extends DeviceMessageReply> CompletionStage<R> retrieveReply(String messageId, Supplier<R> replyNewInstance) {
         return redissonClient
                 .getBucket("device:message:reply:".concat(messageId))
                 .getAndDeleteAsync()
-                .thenApply(deviceReply -> convertReply(deviceReply, null, replyNewInstance));
+                .thenApply(deviceReply -> {
+                    R reply = convertReply(deviceReply, null, replyNewInstance);
+                    reply.messageId(messageId);
+                    return reply;
+                });
     }
 
     @Override
@@ -112,10 +112,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             if (reply != null) {
                 reply.error(ErrorCode.CLIENT_OFFLINE);
             }
+            if (null != reply) {
+                reply.from(message);
+            }
             return CompletableFuture.completedFuture(reply);
         }
+        CompletableFuture<R> future = new CompletableFuture<>();
+
         //发送消息给设备当前连接的服务器
-        return redissonClient
+        redissonClient
                 .getTopic("device:message:accept:".concat(serverId))
                 .publishAsync(message)
                 .thenCompose(deviceConnectedServerNumber -> {
@@ -143,25 +148,45 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                                 .tryAcquireAsync(deviceConnectedServerNumber.intValue(), maxSendAwaitSeconds, TimeUnit.SECONDS)
                                 .thenCompose(complete -> {
                                     try {
-                                        // if (complete) { //无论成功失败都从redis取
-                                        //从redis中获取设备返回的数据
+                                        if (complete && future.isCancelled()) {
+                                            log.debug("设备消息[{}]回复成功,但是已经取消了等待!",
+                                                    message.getMessageId());
+
+                                            return CompletableFuture.completedFuture(null);
+                                        }
+                                        if (!complete) {
+                                            log.warn("等待设备消息回复超时,超时时间:{}s,可通过配置:device.message.await.max-seconds进行修改", maxSendAwaitSeconds);
+                                        }
                                         return redissonClient
                                                 .getBucket("device:message:reply:".concat(message.getMessageId()))
-                                                .getAndDeleteAsync();
-                                        // }
-                                        // return CompletableFuture.completedFuture(null);
+                                                .getAndDeleteAsync()
+                                                .whenComplete((r, err) -> {
+                                                    if (r != null && log.isDebugEnabled()) {
+                                                        log.debug("收到设备回复消息[{}]<={}", message.getDeviceId(), r);
+                                                    }
+                                                });
                                     } finally {
                                         //删除信号
                                         semaphore.deleteAsync();
                                     }
                                 });
+
                     } catch (Exception e) {
                         //异常直接返回错误
                         log.error(e.getMessage(), e);
                         return CompletableFuture.completedFuture(ErrorCode.SYSTEM_ERROR);
                     }
                 })
-                .thenApply(replyMapping);
+                .thenApply(replyMapping)
+                .whenComplete((r, throwable) -> {
+                    if (throwable != null) {
+                        future.completeExceptionally(throwable);
+                    } else {
+                        future.complete(r);
+                    }
+                });
+
+        return future;
     }
 
     @Override
@@ -228,15 +253,16 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
-            public FunctionInvokeMessageSender async() {
-                invokeMessage.setAsync(true);
+            public FunctionInvokeMessageSender async(Boolean async) {
+                invokeMessage.setAsync(async);
                 return this;
             }
 
             @Override
-            public FunctionInvokeMessageSender sync() {
-                invokeMessage.setAsync(false);
-                return this;
+            public CompletionStage<FunctionInvokeMessageReply> retrieveReply() {
+                return RedissonDeviceMessageSender.this.retrieveReply(
+                        Objects.requireNonNull(invokeMessage.getMessageId(), "messageId can not be null"),
+                        FunctionInvokeMessageReply::new);
             }
 
             @Override
@@ -268,6 +294,13 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
+            public CompletionStage<ReadPropertyMessageReply> retrieveReply() {
+                return RedissonDeviceMessageSender.this.retrieveReply(
+                        Objects.requireNonNull(message.getMessageId(), "messageId can not be null"),
+                        ReadPropertyMessageReply::new);
+            }
+
+            @Override
             public CompletionStage<ReadPropertyMessageReply> send() {
                 return RedissonDeviceMessageSender.this.send(message);
             }
@@ -285,6 +318,13 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             public WritePropertyMessageSender write(String property, Object value) {
                 message.addProperty(property, value);
                 return this;
+            }
+
+            @Override
+            public CompletionStage<WritePropertyMessageReply> retrieveReply() {
+                return RedissonDeviceMessageSender.this.retrieveReply(
+                        Objects.requireNonNull(message.getMessageId(), "messageId can not be null"),
+                        WritePropertyMessageReply::new);
             }
 
             @Override
