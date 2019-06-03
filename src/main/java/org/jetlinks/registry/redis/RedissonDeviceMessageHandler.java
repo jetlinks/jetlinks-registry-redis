@@ -1,5 +1,7 @@
 package org.jetlinks.registry.redis;
 
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.message.DeviceMessage;
@@ -20,7 +22,9 @@ import java.util.function.Consumer;
 public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     private RedissonClient redissonClient;
 
-    private int replyExpireTime = 2;
+    @Getter
+    @Setter
+    private long replyExpireTimeSeconds = Long.getLong("device.message.reply.expire-time-seconds", TimeUnit.MINUTES.toSeconds(3));
 
     public RedissonDeviceMessageHandler(RedissonClient redissonClient) {
         this.redissonClient = redissonClient;
@@ -54,8 +58,8 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     public CompletionStage<Boolean> reply(DeviceMessageReply message) {
         RBucket<DeviceMessageReply> bucket = redissonClient.getBucket("device:message:reply:".concat(message.getMessageId()));
         RSemaphore semaphore = redissonClient.getSemaphore("device:reply:".concat(message.getMessageId()));
-        bucket.expireAsync(2, TimeUnit.MINUTES);
-        semaphore.expireAsync(2, TimeUnit.MINUTES);
+        bucket.expireAsync(replyExpireTimeSeconds, TimeUnit.SECONDS);
+        semaphore.expireAsync(replyExpireTimeSeconds, TimeUnit.SECONDS);
         return bucket
                 .setAsync(message)
                 .thenApply(nil -> {
