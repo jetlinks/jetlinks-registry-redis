@@ -61,7 +61,7 @@ public class RedissonDeviceOperationTest {
             FunctionInvokeMessageReply reply = operation.messageSender()
                     .invokeFunction("test")
                     .trySend(10, TimeUnit.SECONDS)
-                    .recoverWith(TimeoutException.class, (__) -> FunctionInvokeMessageReply.failureTry(ErrorCode.TIME_OUT))
+                    .recover(TimeoutException.class, (__) -> FunctionInvokeMessageReply.create().error(ErrorCode.TIME_OUT))
                     .get();
 
             Assert.assertFalse(reply.isSuccess());
