@@ -1,11 +1,14 @@
 package org.jetlinks.registry.redis;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.DeviceInfo;
 import org.jetlinks.core.device.DeviceOperation;
 import org.jetlinks.core.device.DeviceProductOperation;
 import org.jetlinks.core.device.DeviceState;
 import org.jetlinks.core.device.registry.DeviceRegistry;
+import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.redisson.api.RTopic;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
@@ -30,6 +33,10 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
     private Map<String, SoftReference<RedissonDeviceProductOperation>> productLocalCache = new ConcurrentHashMap<>(128);
 
     private RTopic cacheChangedTopic;
+
+    @Getter
+    @Setter
+    private DeviceMessageSenderInterceptor interceptor;
 
     public RedissonDeviceRegistry(RedissonClient client,
                                   ProtocolSupports protocolSupports) {
@@ -85,10 +92,13 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
     }
 
     private RedissonDeviceOperation doGetOperation(String deviceId) {
-        return new RedissonDeviceOperation(deviceId, client,
+        RedissonDeviceOperation operation = new RedissonDeviceOperation(deviceId, client,
                 client.getMap(deviceId.concat(":reg")),
                 protocolSupports,
                 this, () -> cacheChangedTopic.publishAsync(deviceId));
+        operation.setInterceptor(interceptor);
+
+        return operation;
     }
 
     @Override

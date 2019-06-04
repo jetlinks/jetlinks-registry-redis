@@ -1,12 +1,15 @@
 package org.jetlinks.registry.redis;
 
 import com.alibaba.fastjson.JSON;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupport;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.*;
 import org.jetlinks.core.device.registry.DeviceRegistry;
+import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
 import org.jetlinks.core.metadata.DeviceMetadata;
 import org.jetlinks.core.metadata.NullValueWrapper;
@@ -41,6 +44,10 @@ public class RedissonDeviceOperation implements DeviceOperation {
     private String deviceId;
 
     private Runnable changedListener;
+
+    @Setter
+    @Getter
+    private DeviceMessageSenderInterceptor interceptor;
 
     public RedissonDeviceOperation(String deviceId,
                                    RedissonClient redissonClient,
@@ -224,7 +231,9 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceMessageSender messageSender() {
-        return new RedissonDeviceMessageSender(deviceId, redissonClient, this);
+        RedissonDeviceMessageSender sender= new RedissonDeviceMessageSender(deviceId, redissonClient, this);
+        sender.setInterceptor(interceptor);
+        return sender;
     }
 
     @Override

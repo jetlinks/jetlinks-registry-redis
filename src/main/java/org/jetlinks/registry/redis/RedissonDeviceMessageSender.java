@@ -13,6 +13,7 @@ import org.jetlinks.core.message.exception.ParameterUndefinedException;
 import org.jetlinks.core.message.function.FunctionInvokeMessage;
 import org.jetlinks.core.message.function.FunctionInvokeMessageReply;
 import org.jetlinks.core.message.function.FunctionParameter;
+import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.message.property.ReadPropertyMessage;
 import org.jetlinks.core.message.property.ReadPropertyMessageReply;
 import org.jetlinks.core.message.property.WritePropertyMessage;
@@ -52,6 +53,10 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
     private String deviceId;
 
     private DeviceOperation operation;
+
+    @Getter
+    @Setter
+    private DeviceMessageSenderInterceptor interceptor;
 
     public RedissonDeviceMessageSender(String deviceId,
                                        RedissonClient redissonClient,
@@ -105,7 +110,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
     }
 
     @Override
-    public <R extends DeviceMessageReply> CompletionStage<R> send(DeviceMessage message, Function<Object, R> replyMapping) {
+    public <R extends DeviceMessageReply> CompletionStage<R> send(DeviceMessage requestMessage, Function<Object, R> replyMapping) {
         String serverId = connectionServerIdSupplier.get();
         //设备当前没有连接到任何服务器
         if (serverId == null) {
@@ -114,12 +119,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                 reply.error(ErrorCode.CLIENT_OFFLINE);
             }
             if (null != reply) {
-                reply.from(message);
+                reply.from(requestMessage);
             }
             return CompletableFuture.completedFuture(reply);
         }
         CompletableFuture<R> future = new CompletableFuture<>();
-
+        if (interceptor != null) {
+            requestMessage = interceptor.preSend(operation, requestMessage);
+        }
+        DeviceMessage message = requestMessage;
         //发送消息给设备当前连接的服务器
         redissonClient
                 .getTopic("device:message:accept:".concat(serverId))
@@ -179,6 +187,12 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                     }
                 })
                 .thenApply(replyMapping)
+                .thenCompose(r -> {
+                    if (interceptor != null) {
+                        return interceptor.afterReply(operation, message, r);
+                    }
+                    return CompletableFuture.completedFuture(r);
+                })
                 .whenComplete((r, throwable) -> {
                     if (throwable != null) {
                         future.completeExceptionally(throwable);
@@ -258,7 +272,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
             @Override
             public FunctionInvokeMessageSender header(String header, Object value) {
-                message.addHeader(header,value);
+                message.addHeader(header, value);
                 return this;
             }
 
@@ -311,7 +325,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
             @Override
             public ReadPropertyMessageSender header(String header, Object value) {
-                message.addHeader(header,value);
+                message.addHeader(header, value);
                 return this;
             }
 
@@ -350,7 +364,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
             @Override
             public WritePropertyMessageSender header(String header, Object value) {
-                message.addHeader(header,value);
+                message.addHeader(header, value);
                 return this;
             }
 
