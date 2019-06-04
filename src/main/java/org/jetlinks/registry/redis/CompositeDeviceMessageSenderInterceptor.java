@@ -29,9 +29,11 @@ public class CompositeDeviceMessageSenderInterceptor implements DeviceMessageSen
     public <R extends DeviceMessageReply> CompletionStage<R> afterReply(DeviceOperation device, DeviceMessage message, R reply) {
 
         CompletableFuture<R> future = CompletableFuture.completedFuture(reply);
+
         for (DeviceMessageSenderInterceptor interceptor : interceptors) {
             future = future.thenCompose(r -> interceptor.afterReply(device, message, r));
         }
+
         return future;
 
     }
