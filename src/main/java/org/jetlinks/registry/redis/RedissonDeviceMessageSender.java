@@ -29,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -198,30 +199,33 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
     @Override
     public FunctionInvokeMessageSender invokeFunction(String function) {
         Objects.requireNonNull(function, "function");
-        FunctionInvokeMessage invokeMessage = new FunctionInvokeMessage();
-        invokeMessage.setTimestamp(System.currentTimeMillis());
-        invokeMessage.setDeviceId(deviceId);
-        invokeMessage.setFunctionId(function);
-        invokeMessage.setMessageId(IdUtils.newUUID());
+        FunctionInvokeMessage message = new FunctionInvokeMessage();
+        message.setTimestamp(System.currentTimeMillis());
+        message.setDeviceId(deviceId);
+        message.setFunctionId(function);
+        message.setMessageId(IdUtils.newUUID());
         return new FunctionInvokeMessageSender() {
             @Override
             public FunctionInvokeMessageSender addParameter(String name, Object value) {
-                invokeMessage.addInput(name, value);
+                message.addInput(name, value);
+                return this;
+            }
+
+            @Override
+            public FunctionInvokeMessageSender custom(Consumer<FunctionInvokeMessage> messageConsumer) {
+                messageConsumer.accept(message);
                 return this;
             }
 
             @Override
             public FunctionInvokeMessageSender messageId(String messageId) {
-                if (messageId == null || messageId.length() < 16) {
-                    throw new IllegalArgumentException("messageId长度不能低于16");
-                }
-                invokeMessage.setMessageId(messageId);
+                message.setMessageId(messageId);
                 return this;
             }
 
             @Override
             public FunctionInvokeMessageSender setParameter(List<FunctionParameter> parameter) {
-                invokeMessage.setInputs(parameter);
+                message.setInputs(parameter);
                 return this;
             }
 
@@ -231,7 +235,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                 FunctionMetadata functionMetadata = operation.getMetadata().getFunction(function)
                         .orElseThrow(() -> new FunctionUndefinedException(function, "功能[" + function + "]未定义"));
                 List<PropertyMetadata> metadataInputs = functionMetadata.getInputs();
-                List<FunctionParameter> inputs = invokeMessage.getInputs();
+                List<FunctionParameter> inputs = message.getInputs();
 
                 if (inputs.size() != metadataInputs.size()) {
 
@@ -243,7 +247,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                 Map<String, PropertyMetadata> properties = metadataInputs.stream()
                         .collect(Collectors.toMap(PropertyMetadata::getId, Function.identity(), (t1, t2) -> t1));
 
-                for (FunctionParameter input : invokeMessage.getInputs()) {
+                for (FunctionParameter input : message.getInputs()) {
                     PropertyMetadata metadata = Optional.ofNullable(properties.get(input.getName()))
                             .orElseThrow(() -> new ParameterUndefinedException(input.getName(), "参数[" + input.getName() + "]未定义"));
                     resultConsumer.accept(input, metadata.getValueType().validate(input.getValue()));
@@ -253,21 +257,27 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
+            public FunctionInvokeMessageSender header(String header, Object value) {
+                message.addHeader(header,value);
+                return this;
+            }
+
+            @Override
             public FunctionInvokeMessageSender async(Boolean async) {
-                invokeMessage.setAsync(async);
+                message.setAsync(async);
                 return this;
             }
 
             @Override
             public CompletionStage<FunctionInvokeMessageReply> retrieveReply() {
                 return RedissonDeviceMessageSender.this.retrieveReply(
-                        Objects.requireNonNull(invokeMessage.getMessageId(), "messageId can not be null"),
+                        Objects.requireNonNull(message.getMessageId(), "messageId can not be null"),
                         FunctionInvokeMessageReply::new);
             }
 
             @Override
             public CompletionStage<FunctionInvokeMessageReply> send() {
-                return RedissonDeviceMessageSender.this.send(invokeMessage);
+                return RedissonDeviceMessageSender.this.send(message);
             }
 
         };
@@ -288,8 +298,20 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
+            public ReadPropertyMessageSender custom(Consumer<ReadPropertyMessage> messageConsumer) {
+                messageConsumer.accept(message);
+                return this;
+            }
+
+            @Override
             public ReadPropertyMessageSender read(List<String> properties) {
                 message.addProperties(properties);
+                return this;
+            }
+
+            @Override
+            public ReadPropertyMessageSender header(String header, Object value) {
+                message.addHeader(header,value);
                 return this;
             }
 
@@ -317,6 +339,18 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             @Override
             public WritePropertyMessageSender write(String property, Object value) {
                 message.addProperty(property, value);
+                return this;
+            }
+
+            @Override
+            public WritePropertyMessageSender custom(Consumer<WritePropertyMessage> messageConsumer) {
+                messageConsumer.accept(message);
+                return this;
+            }
+
+            @Override
+            public WritePropertyMessageSender header(String header, Object value) {
+                message.addHeader(header,value);
                 return this;
             }
 
