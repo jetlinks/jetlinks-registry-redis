@@ -14,6 +14,7 @@ import org.redisson.api.RMap;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -53,6 +54,15 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
                 .decode((String) rMap.get("metadata"));
     }
 
+    @SuppressWarnings("all")
+    private  <T> T tryGetFromLocalCache(String key) {
+        Object val = localCache.computeIfAbsent(key, k -> Optional.ofNullable(rMap.get(k)).orElse(NullValue.instance));
+        if (val == NullValue.instance) {
+            return null;
+        }
+        return (T) val;
+    }
+
     @Override
     public void updateMetadata(String metadata) {
         rMap.fastPut("metadata", metadata);
@@ -60,7 +70,6 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public DeviceProductInfo getInfo() {
-
         Object info = rMap.get("info");
         if (info instanceof DeviceProductInfo) {
             return ((DeviceProductInfo) info);
@@ -86,7 +95,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public ProtocolSupport getProtocol() {
-        return protocolSupports.getProtocol((String) rMap.computeIfAbsent("protocol", rMap::get));
+        return protocolSupports.getProtocol(tryGetFromLocalCache("protocol"));
     }
 
     private String buildConfigKey(String key) {
@@ -95,7 +104,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public ValueWrapper get(String key) {
-        Object conf = localCache.computeIfAbsent(buildConfigKey(key), rMap::get);
+        Object conf = tryGetFromLocalCache(buildConfigKey(key));
         if (null == conf) {
             return NullValueWrapper.instance;
         }

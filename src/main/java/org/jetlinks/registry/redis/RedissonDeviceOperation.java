@@ -49,6 +49,9 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Getter
     private DeviceMessageSenderInterceptor interceptor;
 
+
+
+
     public RedissonDeviceOperation(String deviceId,
                                    RedissonClient redissonClient,
                                    RMap<String, Object> rMap,
@@ -75,10 +78,18 @@ public class RedissonDeviceOperation implements DeviceOperation {
         return deviceId;
     }
 
+    @SuppressWarnings("all")
+    private <T> T tryGetFromLocalCache(String key) {
+        Object val = localCache.computeIfAbsent(key, k -> Optional.ofNullable(rMap.get(k)).orElse(NullValue.instance));
+        if (val == NullValue.instance) {
+            return null;
+        }
+        return (T) val;
+    }
 
     @Override
     public String getServerId() {
-        String serverId = (String) localCache.computeIfAbsent("serverId", rMap::get);
+        String serverId = tryGetFromLocalCache("serverId");
         if (serverId == null || serverId.isEmpty()) {
             return null;
         }
@@ -87,7 +98,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public String getSessionId() {
-        String sessionId = (String) localCache.computeIfAbsent("sessionId", rMap::get);
+        String sessionId = tryGetFromLocalCache("sessionId");
         if (sessionId == null || sessionId.isEmpty()) {
             return null;
         }
@@ -96,7 +107,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public byte getState() {
-        Byte state = (Byte) localCache.computeIfAbsent("state", rMap::get);
+        Byte state = tryGetFromLocalCache("state");
         return state == null ? DeviceState.unknown : state;
     }
 
@@ -214,13 +225,13 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     private String getProductId() {
-        return (String) localCache.computeIfAbsent("productId", rMap::get);
+        return tryGetFromLocalCache("productId");
     }
 
     @Override
     public ProtocolSupport getProtocol() {
 
-        String protocol = (String) localCache.computeIfAbsent("protocol", rMap::get);
+        String protocol = tryGetFromLocalCache("protocol");
 
         if (protocol != null) {
             return protocolSupports.getProtocol(protocol);
@@ -231,7 +242,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceMessageSender messageSender() {
-        RedissonDeviceMessageSender sender= new RedissonDeviceMessageSender(deviceId, redissonClient, this);
+        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender(deviceId, redissonClient, this);
         sender.setInterceptor(interceptor);
         return sender;
     }
@@ -276,10 +287,10 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public ValueWrapper get(String key) {
         String confKey = createConfigKey(key);
-        Object val = localCache.computeIfAbsent(confKey, rMap::get);
+        Object val = tryGetFromLocalCache(confKey);
 
         if (val == null) {
-            String productId = (String) rMap.get("productId");
+            String productId = getProductId();
             if (null != productId) {
                 //获取产品的配置
                 return registry
