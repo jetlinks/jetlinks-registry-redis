@@ -1,7 +1,5 @@
 package org.jetlinks.registry.redis;
 
-import lombok.Getter;
-import lombok.Setter;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.DeviceInfo;
 import org.jetlinks.core.device.DeviceOperation;
@@ -34,9 +32,8 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
 
     private RTopic cacheChangedTopic;
 
-    @Getter
-    @Setter
-    private DeviceMessageSenderInterceptor interceptor;
+    private final CompositeDeviceMessageSenderInterceptor interceptor = new CompositeDeviceMessageSenderInterceptor();
+
 
     public RedissonDeviceRegistry(RedissonClient client,
                                   ProtocolSupports protocolSupports) {
@@ -55,6 +52,11 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
                     .ifPresent(RedissonDeviceProductOperation::clearCache);
 
         });
+    }
+
+
+    public void addInterceptor(DeviceMessageSenderInterceptor interceptor) {
+        this.interceptor.addInterceptor(interceptor);
     }
 
     @Override

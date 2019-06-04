@@ -5,6 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.device.*;
 import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.message.CommonDeviceMessageReply;
+import org.jetlinks.core.message.DeviceMessage;
+import org.jetlinks.core.message.DeviceMessageReply;
+import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -13,6 +16,8 @@ import org.redisson.api.RedissonClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 
 
@@ -33,6 +38,20 @@ public class RedissonDeviceRegistryTest {
 
         messageHandler = new RedissonDeviceMessageHandler(client);
         registry = new RedissonDeviceRegistry(RedissonHelper.newRedissonClient(), new MockProtocolSupports());
+        registry.addInterceptor(new DeviceMessageSenderInterceptor() {
+            @Override
+            public DeviceMessage preSend(DeviceOperation device, DeviceMessage message) {
+                return message;
+            }
+
+            @Override
+            public <R extends DeviceMessageReply> CompletionStage<R> afterReply(DeviceOperation device, DeviceMessage message, R reply) {
+                return CompletableFuture.supplyAsync(() -> {
+                    log.info("reply Interceptor :{}",reply);
+                    return reply;
+                });
+            }
+        });
     }
 
     public DeviceInfo newDeviceInfo() {
