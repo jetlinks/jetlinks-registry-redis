@@ -21,9 +21,12 @@ import org.redisson.api.RSemaphore;
 import org.redisson.api.RedissonClient;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author zhouhao
@@ -284,6 +287,63 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     private String createConfigKey(String key) {
         return "_cfg:".concat(key);
+    }
+
+    private String recoverConfigKey(String key) {
+        return key.substring(5);
+    }
+
+    private Map<String, Object> recoverConfigMap(Map<String, Object> source) {
+        return source.entrySet()
+                .stream()
+                .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue));
+    }
+
+    @Override
+    @SuppressWarnings("all")
+    public CompletionStage<Map<String, Object>> getAsync(String... key) {
+
+        Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
+
+        String cacheKey = String.valueOf(keSet.hashCode());
+
+        Object cache = localCache.get(cacheKey);
+
+        if (cache instanceof Map) {
+            return CompletableFuture.completedFuture((Map) cache);
+        }
+        //null value 直接获取产品配置
+        if (cache instanceof NullValue) {
+            return registry.getProduct(getProductId()).getAsync(key);
+        }
+        return rMap
+                .getAllAsync(keSet)
+                .thenCompose(mine -> {
+                    if (mine.isEmpty()) {
+                        localCache.put(cacheKey, NullValue.instance);
+                        return registry.getProduct(getProductId()).getAsync(key);
+                    }
+
+                    //只有一部分,尝试从产品配置中获取
+                    if (mine.size() != key.length) {
+                        String[] inProductKey = keSet
+                                .stream()
+                                .filter(k -> !mine.containsKey(k))
+                                .map(this::recoverConfigKey)
+                                .toArray(String[]::new);
+
+                        return registry
+                                .getProduct(getProductId()).getAsync(inProductKey)
+                                .thenApply(productPart -> {
+                                    Map<String, Object> minePart = recoverConfigMap(mine);
+                                    minePart.putAll(productPart);
+                                    return minePart;
+                                });
+                    }
+                    Map<String, Object> recover = recoverConfigMap(mine);
+                    localCache.put(cacheKey, recover);
+                    return CompletableFuture.completedFuture(recover);
+                });
     }
 
     @Override

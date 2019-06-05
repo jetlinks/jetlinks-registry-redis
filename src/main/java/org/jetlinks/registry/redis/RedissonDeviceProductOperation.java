@@ -12,10 +12,12 @@ import org.jetlinks.core.device.DeviceProductInfo;
 import org.jetlinks.core.device.DeviceProductOperation;
 import org.redisson.api.RMap;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author zhouhao
@@ -55,7 +57,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
     }
 
     @SuppressWarnings("all")
-    private  <T> T tryGetFromLocalCache(String key) {
+    private <T> T tryGetFromLocalCache(String key) {
         Object val = localCache.computeIfAbsent(key, k -> Optional.ofNullable(rMap.get(k)).orElse(NullValue.instance));
         if (val == NullValue.instance) {
             return null;
@@ -98,24 +100,55 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         return protocolSupports.getProtocol(tryGetFromLocalCache("protocol"));
     }
 
-    private String buildConfigKey(String key) {
+    private String createConfigKey(String key) {
         return "_cfg:".concat(key);
+    }
+
+    private String recoverConfigKey(String key) {
+        return key.substring(5);
     }
 
     @Override
     public ValueWrapper get(String key) {
-        Object conf = tryGetFromLocalCache(buildConfigKey(key));
+        Object conf = tryGetFromLocalCache(createConfigKey(key));
         if (null == conf) {
             return NullValueWrapper.instance;
         }
         return new DefaultValueWrapper(conf);
     }
 
+
+    @Override
+    @SuppressWarnings("all")
+    public CompletionStage<Map<String, Object>> getAsync(String... key) {
+        Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
+
+        String cacheKey = String.valueOf(keSet.hashCode());
+
+        Object cache = localCache.get(cacheKey);
+
+        if (cache instanceof Map) {
+            return CompletableFuture.completedFuture((Map) cache);
+        }
+        if (cache instanceof NullValue) {
+            return CompletableFuture.completedFuture(Collections.emptyMap());
+        }
+        return rMap.getAllAsync(keSet)
+                .thenApply((conf) -> {
+                    conf = conf.entrySet()
+                            .stream()
+                            .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue));
+
+                    localCache.put(cacheKey, conf);
+                    return conf;
+                });
+    }
+
     @Override
     public void putAll(Map<String, Object> conf) {
         Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
-            newMap.put(buildConfigKey(entry.getKey()), entry.getValue());
+            newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
         rMap.putAll(newMap);
         cacheChangedListener.run();
@@ -123,13 +156,13 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public void put(String key, Object value) {
-        rMap.fastPut(buildConfigKey(key), value);
+        rMap.fastPut(createConfigKey(key), value);
         cacheChangedListener.run();
     }
 
     @Override
     public void remove(String key) {
-        rMap.fastRemove(buildConfigKey(key));
+        rMap.fastRemove(createConfigKey(key));
         cacheChangedListener.run();
     }
 }

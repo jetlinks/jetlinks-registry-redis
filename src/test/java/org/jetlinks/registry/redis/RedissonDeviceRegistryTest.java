@@ -15,6 +15,7 @@ import org.redisson.api.RedissonClient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -37,7 +38,7 @@ public class RedissonDeviceRegistryTest {
         RedissonClient client = RedissonHelper.newRedissonClient();
 
         messageHandler = new RedissonDeviceMessageHandler(client);
-        registry = new RedissonDeviceRegistry(RedissonHelper.newRedissonClient(),messageHandler, new MockProtocolSupports());
+        registry = new RedissonDeviceRegistry(RedissonHelper.newRedissonClient(), messageHandler, new MockProtocolSupports());
         registry.addInterceptor(new DeviceMessageSenderInterceptor() {
             @Override
             public DeviceMessage preSend(DeviceOperation device, DeviceMessage message) {
@@ -47,7 +48,7 @@ public class RedissonDeviceRegistryTest {
             @Override
             public <R extends DeviceMessageReply> CompletionStage<R> afterReply(DeviceOperation device, DeviceMessage message, R reply) {
                 return CompletableFuture.supplyAsync(() -> {
-                    log.info("reply Interceptor :{}",reply);
+                    log.info("reply Interceptor :{}", reply);
                     return reply;
                 });
             }
@@ -67,6 +68,7 @@ public class RedissonDeviceRegistryTest {
     }
 
     @Test
+    @SneakyThrows
     public void testConfig() {
         DeviceInfo info = newDeviceInfo();
         DeviceProductInfo productInfo = new DeviceProductInfo();
@@ -80,6 +82,7 @@ public class RedissonDeviceRegistryTest {
         DeviceProductOperation productOperation = registry.getProduct(productInfo.getId());
         productOperation.update(productInfo);
         productOperation.put("test_config", "1234");
+        productOperation.put("test_config__", "aaa");
         try {
             Assert.assertNotNull(productOperation.getProtocol());
 
@@ -88,8 +91,21 @@ public class RedissonDeviceRegistryTest {
             Assert.assertNotNull(operation.getProtocol());
 
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "1234");
+
+            Map<String, Object> conf = operation.getAsync("test_config").toCompletableFuture().get(10, TimeUnit.SECONDS);
+            System.out.println(conf);
+            Assert.assertEquals(conf.get("test_config"), "1234");
+
             operation.put("test_config", "2345");
+            operation.put("test_config2", 1234);
+
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "2345");
+            conf = operation.getAsync("test_config", "test_config__", "test_config2").toCompletableFuture().get(10, TimeUnit.SECONDS);
+            System.out.println(conf);
+            Assert.assertEquals(conf.get("test_config"), "2345");
+            Assert.assertEquals(conf.get("test_config2"), 1234);
+            Assert.assertEquals(conf.get("test_config__"), "aaa");
+
         } finally {
             registry.unRegistry(info.getId());
         }
