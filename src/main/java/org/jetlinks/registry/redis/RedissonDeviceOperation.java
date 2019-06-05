@@ -303,7 +303,9 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @SuppressWarnings("all")
     public CompletionStage<Map<String, Object>> getAsync(String... key) {
 
-        Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
+        Set<String> keSet = Stream.of(key)
+                .map(this::createConfigKey)
+                .collect(Collectors.toSet());
 
         String cacheKey = String.valueOf(keSet.hashCode());
 
@@ -321,10 +323,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 .thenCompose(mine -> {
                     if (mine.isEmpty()) {
                         localCache.put(cacheKey, NullValue.instance);
-                        return registry.getProduct(getProductId()).getAsync(key);
+                        return registry
+                                .getProduct(getProductId())
+                                .getAsync(key);
                     }
-
-                    //只有一部分,尝试从产品配置中获取
+                    //只有一部分,尝试从产品中获取
                     if (mine.size() != key.length) {
                         String[] inProductKey = keSet
                                 .stream()
