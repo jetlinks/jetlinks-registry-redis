@@ -41,7 +41,7 @@ public class RedissonDeviceOperationTest {
     public void init() {
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
-        registry = new RedissonDeviceRegistry(client, protocol -> jetLinksProtocolSupport);
+        registry = new RedissonDeviceRegistry(client,new RedissonDeviceMessageHandler(client), protocol -> jetLinksProtocolSupport);
     }
 
     //设备网关服务宕机
@@ -120,12 +120,12 @@ public class RedissonDeviceOperationTest {
         try {
             DeviceOperation operation = registry.getDevice("test2");
             operation.online("test-server", "12");
-            RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, operation);
+            RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, new RedissonDeviceMessageHandler(client),operation);
 
             RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
-            handler.markMessageAsync("testId");
-            Assert.assertTrue(handler.messageIsAsync("testId"));
+            handler.markMessageAsync("testId").toCompletableFuture().get(10,TimeUnit.SECONDS);
+            Assert.assertTrue(handler.messageIsAsync("testId").toCompletableFuture().get(10,TimeUnit.SECONDS));
 
             AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();
             //处理发往设备的消息

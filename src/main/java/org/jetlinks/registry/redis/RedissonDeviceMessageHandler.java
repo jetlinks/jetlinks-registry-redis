@@ -26,6 +26,10 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     @Setter
     private long replyExpireTimeSeconds = Long.getLong("device.message.reply.expire-time-seconds", TimeUnit.MINUTES.toSeconds(3));
 
+    @Getter
+    @Setter
+    private long asyncFlagExpireTimeSeconds = Long.getLong("device.message.async-flag.expire-time-seconds", TimeUnit.MINUTES.toSeconds(30));
+
     public RedissonDeviceMessageHandler(RedissonClient redissonClient) {
         this.redissonClient = redissonClient;
     }
@@ -70,15 +74,24 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     }
 
     @Override
-    public void markMessageAsync(String messageId) {
+    public CompletionStage<Void> markMessageAsync(String messageId) {
         RBucket<Boolean> bucket = redissonClient.getBucket("async-msg:".concat(messageId));
-        bucket.set(true);
-        bucket.expireAsync(10, TimeUnit.MINUTES);
+        return bucket.setAsync(true)
+                .thenRun(() -> bucket.expireAsync(asyncFlagExpireTimeSeconds, TimeUnit.SECONDS));
     }
 
     @Override
-    public boolean messageIsAsync(String messageId) {
+    public CompletionStage<Boolean> messageIsAsync(String messageId, boolean reset) {
         RBucket<Boolean> bucket = redissonClient.getBucket("async-msg:".concat(messageId));
-        return Boolean.TRUE.equals(bucket.getAndDelete());
+        if (reset) {
+            return bucket.getAndDeleteAsync();
+        } else {
+            return bucket.getAsync()
+                    .whenComplete((s, err) -> {
+                        if (s != null) {
+                            bucket.expireAsync(asyncFlagExpireTimeSeconds, TimeUnit.SECONDS);
+                        }
+                    });
+        }
     }
 }

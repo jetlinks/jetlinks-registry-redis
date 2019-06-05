@@ -5,6 +5,7 @@ import org.jetlinks.core.device.DeviceInfo;
 import org.jetlinks.core.device.DeviceOperation;
 import org.jetlinks.core.device.DeviceProductOperation;
 import org.jetlinks.core.device.DeviceState;
+import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.redisson.api.RTopic;
@@ -34,12 +35,15 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
 
     private final CompositeDeviceMessageSenderInterceptor interceptor = new CompositeDeviceMessageSenderInterceptor();
 
+    private DeviceMessageHandler messageHandler;
 
     public RedissonDeviceRegistry(RedissonClient client,
+                                  DeviceMessageHandler handler,
                                   ProtocolSupports protocolSupports) {
         this.client = client;
         this.protocolSupports = protocolSupports;
         this.cacheChangedTopic = client.getTopic("device:registry:cache:changed", StringCodec.INSTANCE);
+        this.messageHandler=handler;
 
         cacheChangedTopic.addListener(String.class, (t, id) -> {
 
@@ -97,6 +101,7 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
         RedissonDeviceOperation operation = new RedissonDeviceOperation(deviceId, client,
                 client.getMap(deviceId.concat(":reg")),
                 protocolSupports,
+                messageHandler,
                 this, () -> cacheChangedTopic.publishAsync(deviceId));
         operation.setInterceptor(interceptor);
 

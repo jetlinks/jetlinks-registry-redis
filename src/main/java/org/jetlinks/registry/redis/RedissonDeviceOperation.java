@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupport;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.*;
+import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
@@ -49,13 +50,13 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Getter
     private DeviceMessageSenderInterceptor interceptor;
 
-
-
+    private DeviceMessageHandler deviceMessageHandler;
 
     public RedissonDeviceOperation(String deviceId,
                                    RedissonClient redissonClient,
                                    RMap<String, Object> rMap,
                                    ProtocolSupports protocolSupports,
+                                   DeviceMessageHandler deviceMessageHandler,
                                    DeviceRegistry registry,
                                    Runnable changedListener) {
         this.deviceId = deviceId;
@@ -63,6 +64,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
         this.rMap = rMap;
         this.protocolSupports = protocolSupports;
         this.registry = registry;
+        this.deviceMessageHandler = deviceMessageHandler;
         this.changedListener = () -> {
             clearCache();
             changedListener.run();
@@ -242,7 +244,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceMessageSender messageSender() {
-        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender(deviceId, redissonClient, this);
+        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender(deviceId, redissonClient, deviceMessageHandler, this);
         sender.setInterceptor(interceptor);
         return sender;
     }

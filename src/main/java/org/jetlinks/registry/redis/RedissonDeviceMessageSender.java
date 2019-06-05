@@ -6,6 +6,7 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.device.DeviceMessageSender;
 import org.jetlinks.core.device.DeviceOperation;
+import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.enums.ErrorCode;
 import org.jetlinks.core.message.*;
 import org.jetlinks.core.message.exception.FunctionUndefinedException;
@@ -54,15 +55,24 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
     private DeviceOperation operation;
 
+    //从元数据中获取异步
+    @Getter
+    @Setter
+    private boolean asyncFromMetadata = Boolean.getBoolean("device.message.async.from-metadata");
+
     @Getter
     @Setter
     private DeviceMessageSenderInterceptor interceptor;
 
+    private DeviceMessageHandler messageHandler;
+
     public RedissonDeviceMessageSender(String deviceId,
                                        RedissonClient redissonClient,
+                                       DeviceMessageHandler messageHandler,
                                        DeviceOperation operation) {
         this.redissonClient = redissonClient;
         this.operation = operation;
+        this.messageHandler = messageHandler;
         this.connectionServerIdSupplier = operation::getServerId;
         this.deviceStateChecker = operation::checkState;
         this.deviceId = deviceId;
@@ -128,6 +138,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
             requestMessage = interceptor.preSend(operation, requestMessage);
         }
         DeviceMessage message = requestMessage;
+        //标记异步
+        if (Headers.async.get(message).asBoolean().orElse(false)) {
+            messageHandler.markMessageAsync(message.getMessageId())
+                    .whenComplete((nil, error) -> {
+                        if (error != null) {
+                            log.error("设置异步消息标识[{}]失败", message, error);
+                        }
+                    });
+        }
         //发送消息给设备当前连接的服务器
         redissonClient
                 .getTopic("device:message:accept:".concat(serverId))
@@ -165,6 +184,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                                         }
                                         if (!complete) {
                                             log.warn("等待设备消息回复超时,超时时间:{}s,可通过配置:device.message.await.max-seconds进行修改", maxSendAwaitSeconds);
+                                            return CompletableFuture.completedFuture(null);
                                         }
                                         return redissonClient
                                                 .getBucket("device:message:reply:".concat(message.getMessageId()))
@@ -219,6 +239,8 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
         message.setFunctionId(function);
         message.setMessageId(IdUtils.newUUID());
         return new FunctionInvokeMessageSender() {
+            boolean markAsync = false;
+
             @Override
             public FunctionInvokeMessageSender addParameter(String name, Object value) {
                 message.addInput(name, value);
@@ -278,7 +300,10 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
             @Override
             public FunctionInvokeMessageSender async(Boolean async) {
-                message.setAsync(async);
+                if (async != null) {
+                    custom(async ? Headers.async.setter() : Headers.async.clear());
+                }
+                markAsync = true;
                 return this;
             }
 
@@ -291,6 +316,15 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
             @Override
             public CompletionStage<FunctionInvokeMessageReply> send() {
+
+                //如果未明确指定是否异步,则获取元数据中定义的异步配置
+                if (!markAsync && asyncFromMetadata && message.getHeader(Headers.async.getHeader()).isPresent()) {
+                    message.addHeader(Headers.async.getHeader(),
+                            operation.getMetadata()
+                                    .getFunction(message.getFunctionId())
+                                    .map(FunctionMetadata::isAsync)
+                                    .orElse(false));
+                }
                 return RedissonDeviceMessageSender.this.send(message);
             }
 
