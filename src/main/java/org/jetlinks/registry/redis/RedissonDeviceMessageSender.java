@@ -183,7 +183,9 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                                             return CompletableFuture.completedFuture(null);
                                         }
                                         if (!complete) {
-                                            log.warn("等待设备消息回复超时,超时时间:{}s,可通过配置:device.message.await.max-seconds进行修改", maxSendAwaitSeconds);
+                                            if (!future.isCancelled()) {
+                                                log.warn("等待设备消息回复超时,超时时间:{}s,可通过配置:device.message.await.max-seconds进行修改", maxSendAwaitSeconds);
+                                            }
                                             return CompletableFuture.completedFuture(null);
                                         }
                                         return redissonClient
