@@ -207,7 +207,14 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public CompletionStage<AuthenticationResponse> authenticate(AuthenticationRequest request) {
-        return getProtocol().authenticate(request, this);
+        try {
+            return getProtocol()
+                    .authenticate(request, this);
+        } catch (Throwable e) {
+            CompletableFuture<AuthenticationResponse> future = new CompletableFuture<>();
+            future.completeExceptionally(e);
+            return future;
+        }
     }
 
     @Override
@@ -241,7 +248,9 @@ public class RedissonDeviceOperation implements DeviceOperation {
         if (protocol != null) {
             return protocolSupports.getProtocol(protocol);
         } else {
-            return registry.getProduct(getProductId()).getProtocol();
+            return Optional.ofNullable(registry.getProduct(getProductId()))
+                    .map(DeviceProductOperation::getProtocol)
+                    .orElseThrow(() -> new UnsupportedOperationException("设备[" + deviceId + "]未配置协议以及产品信息"));
         }
     }
 

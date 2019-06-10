@@ -43,7 +43,7 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
         this.client = client;
         this.protocolSupports = protocolSupports;
         this.cacheChangedTopic = client.getTopic("device:registry:cache:changed", StringCodec.INSTANCE);
-        this.messageHandler=handler;
+        this.messageHandler = handler;
 
         cacheChangedTopic.addListener(String.class, (t, id) -> {
 
@@ -65,6 +65,9 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
 
     @Override
     public DeviceProductOperation getProduct(String productId) {
+        if (productId == null || productId.isEmpty()) {
+            return null;
+        }
         SoftReference<RedissonDeviceProductOperation> reference = productLocalCache.get(productId);
 
         if (reference == null || reference.get() == null) {
