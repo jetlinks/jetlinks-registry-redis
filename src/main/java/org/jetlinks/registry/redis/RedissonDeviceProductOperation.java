@@ -53,7 +53,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
     public DeviceMetadata getMetadata() {
         return getProtocol()
                 .getMetadataCodec()
-                .decode((String) rMap.get("metadata"));
+                .decode(tryGetFromLocalCache("metadata"));
     }
 
     @SuppressWarnings("all")
@@ -68,11 +68,12 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
     @Override
     public void updateMetadata(String metadata) {
         rMap.fastPut("metadata", metadata);
+        localCache.put("metadata",metadata);
     }
 
     @Override
     public DeviceProductInfo getInfo() {
-        Object info = rMap.get("info");
+        Object info = tryGetFromLocalCache("info");
         if (info instanceof DeviceProductInfo) {
             return ((DeviceProductInfo) info);
         }
@@ -92,6 +93,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
             all.put("protocol", info.getProtocol());
         }
         rMap.putAll(all);
+        localCache.putAll(all);
         cacheChangedListener.run();
     }
 
@@ -116,11 +118,35 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         }
         return new DefaultValueWrapper(conf);
     }
+    @Override
+    @SuppressWarnings("all")
+    public Map<String, Object> getAll(String... key) {
+        Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
+
+        String cacheKey = String.valueOf(keSet.hashCode());
+
+        Object cache = localCache.get(cacheKey);
+
+        if (cache instanceof Map) {
+            return (Map) cache;
+        }
+        if (cache instanceof NullValue) {
+            return Collections.emptyMap();
+        }
+        Map<String,Object> inRedis=Collections.unmodifiableMap(rMap.getAll(keSet)
+                .entrySet()
+                .stream()
+                .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue,(_1,_2)->_1)));
+
+        localCache.put(cacheKey,inRedis);
+
+        return inRedis;
+    }
 
 
     @Override
     @SuppressWarnings("all")
-    public CompletionStage<Map<String, Object>> getAsync(String... key) {
+    public CompletionStage<Map<String, Object>> getAllAsync(String... key) {
         Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
 
         String cacheKey = String.valueOf(keSet.hashCode());

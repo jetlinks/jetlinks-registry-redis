@@ -92,7 +92,7 @@ public class RedissonDeviceRegistryTest {
 
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "1234");
 
-            Map<String, Object> conf = operation.getAsync("test_config").toCompletableFuture().get(10, TimeUnit.SECONDS);
+            Map<String, Object> conf = operation.getAll("test_config");
             System.out.println(conf);
             Assert.assertEquals(conf.get("test_config"), "1234");
 
@@ -100,7 +100,7 @@ public class RedissonDeviceRegistryTest {
             operation.put("test_config2", 1234);
 
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "2345");
-            conf = operation.getAsync("test_config", "test_config__", "test_config2").toCompletableFuture().get(10, TimeUnit.SECONDS);
+            conf = operation.getAllAsync("test_config", "test_config__", "test_config2").toCompletableFuture().get(10, TimeUnit.SECONDS);
             System.out.println(conf);
             Assert.assertEquals(conf.get("test_config"), "2345");
             Assert.assertEquals(conf.get("test_config2"), 1234);

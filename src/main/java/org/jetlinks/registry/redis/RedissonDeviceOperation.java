@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -40,6 +41,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     private RMap<String, Object> rMap;
 
     private Map<String, Object> localCache = new ConcurrentHashMap<>(32);
+    private Map<String, Object> confCache = new ConcurrentHashMap<>(32);
 
     private ProtocolSupports protocolSupports;
 
@@ -47,7 +49,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     private String deviceId;
 
-    private Runnable changedListener;
+    private Consumer<Boolean> changedListener;
 
     @Setter
     @Getter
@@ -61,21 +63,26 @@ public class RedissonDeviceOperation implements DeviceOperation {
                                    ProtocolSupports protocolSupports,
                                    DeviceMessageHandler deviceMessageHandler,
                                    DeviceRegistry registry,
-                                   Runnable changedListener) {
+                                   Consumer<Boolean> changedListener) {
         this.deviceId = deviceId;
         this.redissonClient = redissonClient;
         this.rMap = rMap;
         this.protocolSupports = protocolSupports;
         this.registry = registry;
         this.deviceMessageHandler = deviceMessageHandler;
-        this.changedListener = () -> {
-            clearCache();
-            changedListener.run();
+        this.changedListener = (isConf) -> {
+            clearCache(isConf);
+            changedListener.accept(isConf);
         };
     }
 
-    void clearCache() {
-        localCache.clear();
+    void clearCache(boolean isConf) {
+        if (isConf) {
+            confCache.clear();
+        } else {
+            localCache.clear();
+        }
+
     }
 
     @Override
@@ -86,6 +93,14 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @SuppressWarnings("all")
     private <T> T tryGetFromLocalCache(String key) {
         Object val = localCache.computeIfAbsent(key, k -> Optional.ofNullable(rMap.get(k)).orElse(NullValue.instance));
+        if (val == NullValue.instance) {
+            return null;
+        }
+        return (T) val;
+    }
+
+    private <T> T tryGetFromConfCache(String key) {
+        Object val = confCache.computeIfAbsent(key, k -> Optional.ofNullable(rMap.get(k)).orElse(NullValue.instance));
         if (val == NullValue.instance) {
             return null;
         }
@@ -119,8 +134,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     @SneakyThrows
     public void putState(byte state) {
+        localCache.put("state", state);
+
         execute(rMap.fastPutAsync("state", state));
-        changedListener.run();
+
+        changedListener.accept(false);
     }
 
     private void execute(RFuture<?> future) {
@@ -189,8 +207,10 @@ public class RedissonDeviceOperation implements DeviceOperation {
         map.put("sessionId", sessionId);
         map.put("state", DeviceState.online);
         map.put("onlineTime", System.currentTimeMillis());
+        localCache.putAll(map);
+
         execute(rMap.putAllAsync(map));
-        changedListener.run();
+        changedListener.accept(false);
     }
 
     @Override
@@ -200,9 +220,10 @@ public class RedissonDeviceOperation implements DeviceOperation {
         map.put("offlineTime", System.currentTimeMillis());
         map.put("serverId", "");
         map.put("sessionId", "");
+        localCache.putAll(map);
 
         execute(rMap.putAllAsync(map));
-        changedListener.run();
+        changedListener.accept(false);
     }
 
     @Override
@@ -285,12 +306,12 @@ public class RedissonDeviceOperation implements DeviceOperation {
             all.put("productId", deviceInfo.getProductId());
         }
         execute(rMap.putAllAsync(all));
-        changedListener.run();
+        changedListener.accept(false);
     }
 
     @Override
     public void updateMetadata(String metadata) {
-        changedListener.run();
+        changedListener.accept(false);
         rMap.fastPut("metadata", metadata);
     }
 
@@ -309,8 +330,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
-    @SuppressWarnings("all")
-    public CompletionStage<Map<String, Object>> getAsync(String... key) {
+    public Map<String, Object> getAll(String... key) {
 
         Set<String> keSet = Stream.of(key)
                 .map(this::createConfigKey)
@@ -318,23 +338,74 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
         String cacheKey = String.valueOf(keSet.hashCode());
 
-        Object cache = localCache.get(cacheKey);
+        Object cache = confCache.get(cacheKey);
+
+        if (cache instanceof Map) {
+            return (Map) cache;
+        }
+        //null value 直接获取产品配置
+        if (cache instanceof NullValue) {
+            return registry.getProduct(getProductId()).getAll(key);
+        }
+        return Optional.of(rMap
+                .getAll(keSet))
+                .map(mine -> {
+                    if (mine.isEmpty()) {
+                        confCache.put(cacheKey, NullValue.instance);
+                        return registry
+                                .getProduct(getProductId())
+                                .getAll(key);
+                    }
+                    //只有一部分,尝试从产品中获取
+                    if (mine.size() != key.length) {
+                        String[] inProductKey = keSet
+                                .stream()
+                                .filter(k -> !mine.containsKey(k))
+                                .map(this::recoverConfigKey)
+                                .toArray(String[]::new);
+
+                        return Optional.of(registry
+                                .getProduct(getProductId())
+                                .getAll(inProductKey))
+                                .map(productPart -> {
+                                    Map<String, Object> minePart = recoverConfigMap(mine);
+                                    minePart.putAll(productPart);
+                                    return minePart;
+                                }).get();
+                    }
+                    Map<String, Object> recover = Collections.unmodifiableMap(recoverConfigMap(mine));
+                    confCache.put(cacheKey, recover);
+                    return recover;
+                }).get();
+    }
+
+    @Override
+    @SuppressWarnings("all")
+    public CompletionStage<Map<String, Object>> getAllAsync(String... key) {
+
+        Set<String> keSet = Stream.of(key)
+                .map(this::createConfigKey)
+                .collect(Collectors.toSet());
+
+        String cacheKey = String.valueOf(keSet.hashCode());
+
+        Object cache = confCache.get(cacheKey);
 
         if (cache instanceof Map) {
             return CompletableFuture.completedFuture((Map) cache);
         }
         //null value 直接获取产品配置
         if (cache instanceof NullValue) {
-            return registry.getProduct(getProductId()).getAsync(key);
+            return registry.getProduct(getProductId()).getAllAsync(key);
         }
         return rMap
                 .getAllAsync(keSet)
                 .thenCompose(mine -> {
                     if (mine.isEmpty()) {
-                        localCache.put(cacheKey, NullValue.instance);
+                        confCache.put(cacheKey, NullValue.instance);
                         return registry
                                 .getProduct(getProductId())
-                                .getAsync(key);
+                                .getAllAsync(key);
                     }
                     //只有一部分,尝试从产品中获取
                     if (mine.size() != key.length) {
@@ -345,7 +416,8 @@ public class RedissonDeviceOperation implements DeviceOperation {
                                 .toArray(String[]::new);
 
                         return registry
-                                .getProduct(getProductId()).getAsync(inProductKey)
+                                .getProduct(getProductId())
+                                .getAllAsync(inProductKey)
                                 .thenApply(productPart -> {
                                     Map<String, Object> minePart = recoverConfigMap(mine);
                                     minePart.putAll(productPart);
@@ -353,7 +425,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
                                 });
                     }
                     Map<String, Object> recover = recoverConfigMap(mine);
-                    localCache.put(cacheKey, recover);
+                    confCache.put(cacheKey, recover);
                     return CompletableFuture.completedFuture(recover);
                 });
     }
@@ -361,7 +433,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Override
     public ValueWrapper get(String key) {
         String confKey = createConfigKey(key);
-        Object val = tryGetFromLocalCache(confKey);
+        Object val = tryGetFromConfCache(confKey);
 
         if (val == null) {
             String productId = getProductId();
@@ -379,8 +451,9 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void put(String key, Object value) {
-        rMap.fastPut(createConfigKey(key), value);
-        changedListener.run();
+        rMap.fastPut(key = createConfigKey(key), value);
+        confCache.put(key, value);
+        changedListener.accept(true);
     }
 
     @Override
@@ -390,18 +463,23 @@ public class RedissonDeviceOperation implements DeviceOperation {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
         rMap.putAll(newMap);
-        changedListener.run();
+        confCache.putAll(newMap);
+        changedListener.accept(true);
     }
 
     @Override
     public void remove(String key) {
-        changedListener.run();
-        rMap.fastRemove(createConfigKey(key));
+        rMap.fastRemove(key = createConfigKey(key));
+        confCache.remove(key);
+        changedListener.accept(true);
     }
 
     void delete() {
-        changedListener.run();
+        changedListener.accept(true);
         rMap.delete();
+        confCache.clear();
+        localCache.clear();
+
     }
 
 }

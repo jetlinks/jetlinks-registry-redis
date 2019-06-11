@@ -1,5 +1,6 @@
 package org.jetlinks.registry.redis;
 
+import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.DeviceInfo;
 import org.jetlinks.core.device.DeviceOperation;
@@ -21,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author zhouhao
  * @since 1.0.0
  */
+@Slf4j
 public class RedissonDeviceRegistry implements DeviceRegistry {
 
     private RedissonClient client;
@@ -47,11 +49,21 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
 
         cacheChangedTopic.addListener(String.class, (t, id) -> {
 
-            Optional.ofNullable(localCache.remove(id))
-                    .map(SoftReference::get)
-                    .ifPresent(RedissonDeviceOperation::clearCache);
+            String[] split = id.split("[@]");
+            byte clearType = 1;
+            if (split.length == 2) {
+                id = split[0];
+                clearType = Byte.valueOf(split[1]);
+            } else if (split.length > 2) {
+                log.warn("本地缓存可能出错,id[{}]不合法", id);
+            }
+            boolean clearConf = clearType == 1;
 
-            Optional.ofNullable(productLocalCache.remove(id))
+            Optional.ofNullable(localCache.get(id))
+                    .map(SoftReference::get)
+                    .ifPresent(cache -> cache.clearCache(clearConf));
+
+            Optional.ofNullable(productLocalCache.get(id))
                     .map(SoftReference::get)
                     .ifPresent(RedissonDeviceProductOperation::clearCache);
 
@@ -97,7 +109,7 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
     private RedissonDeviceProductOperation doGetProduct(String productId) {
         return new RedissonDeviceProductOperation(client.getMap("product:".concat(productId).concat(":reg"))
                 , protocolSupports,
-                () -> cacheChangedTopic.publishAsync(productId));
+                () -> cacheChangedTopic.publishAsync(productId.concat("@-1")));
     }
 
     private RedissonDeviceOperation doGetOperation(String deviceId) {
@@ -105,7 +117,7 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
                 client.getMap(deviceId.concat(":reg")),
                 protocolSupports,
                 messageHandler,
-                this, () -> cacheChangedTopic.publishAsync(deviceId));
+                this, (isConf) -> cacheChangedTopic.publishAsync(deviceId.concat("@").concat(isConf ? "1" : "0")));
         operation.setInterceptor(interceptor);
 
         return operation;
