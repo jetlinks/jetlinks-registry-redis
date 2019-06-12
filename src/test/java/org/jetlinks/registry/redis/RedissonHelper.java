@@ -6,10 +6,7 @@ import org.redisson.api.RMap;
 import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * @author zhouhao
@@ -23,6 +20,8 @@ public class RedissonHelper {
                 .setAddress(System.getProperty("redis.host", "redis://127.0.0.1:6379"))
                 .setDatabase(0)
                 .setTimeout(10000)
+                .setRetryAttempts(1000)
+                .setRetryInterval(10)
                 .setConnectionPoolSize(1024)
                 .setConnectTimeout(10000);
         config.setThreads(32);
@@ -34,32 +33,33 @@ public class RedissonHelper {
     @SneakyThrows
     public static void main(String[] args) {
         RedissonClient client = newRedissonClient();
-        ExecutorService executorService= Executors.newFixedThreadPool(32);
+        ExecutorService executorService = Executors.newFixedThreadPool(32);
 
-        RMap<String, Object> map = client.getMap("test-map");
+        RMap<String, String> map = client.getMap("test-map");
         map.put("key1", "value1");
         map.put("key2", "value2");
         map.put("key3", "value3");
-        CountDownLatch latch = new CountDownLatch(100000);
-        for (int i = 0; i < 100000; i++) {
-            int fi = i;
-            executorService.submit(()->{
 
-               return map.getAsync("key1")
-                        .whenComplete((val, err) -> {
-                            System.out.println(val + " => " + fi + " =>" + Thread.currentThread().getName());
+        CountDownLatch latch = new CountDownLatch(1000);
+        long startWith = System.currentTimeMillis();
 
-                            if (null != err) {
-                                err.printStackTrace();
-                            }
-                            latch.countDown();
-
-                        }).toCompletableFuture()
-                        .get(10, TimeUnit.SECONDS);
-            });
-
+        for (int i = 0; i < 1000; i++) {
+            CompletableFuture
+                    .supplyAsync(() -> map.get("key1"), executorService)
+                    .thenRun(latch::countDown);
         }
+        System.out.println("executorService:" + (System.currentTimeMillis() - startWith) + "ms");
         latch.await();
+
+        CountDownLatch latch2 = new CountDownLatch(1000);
+        startWith = System.currentTimeMillis();
+        for (int i = 0; i < 1000; i++) {
+            map.getAsync("key1")
+                    .thenRun(latch2::countDown);
+        }
+        latch2.await();
+        System.out.println("async:" + (System.currentTimeMillis() - startWith) + "ms");
+        executorService.shutdown();
         client.shutdown();
     }
 }
