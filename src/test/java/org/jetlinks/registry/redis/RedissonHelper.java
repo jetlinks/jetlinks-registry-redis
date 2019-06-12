@@ -21,7 +21,7 @@ public class RedissonHelper {
                 .setDatabase(0)
                 .setTimeout(10000)
                 .setRetryAttempts(1000)
-                .setRetryInterval(10)
+                .setRetryInterval(500)
                 .setConnectionPoolSize(1024)
                 .setConnectTimeout(10000);
         config.setThreads(32);
