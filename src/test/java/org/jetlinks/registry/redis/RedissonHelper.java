@@ -21,8 +21,8 @@ public class RedissonHelper {
                 .setDatabase(0)
                 .setTimeout(10000)
                 .setRetryAttempts(1000)
-                .setRetryInterval(500)
-                .setConnectionPoolSize(1024)
+                .setRetryInterval(100)
+                .setConnectionPoolSize(32)
                 .setConnectTimeout(10000);
         config.setThreads(32);
         config.setNettyThreads(32);
@@ -39,7 +39,6 @@ public class RedissonHelper {
         map.put("key1", "value1");
         map.put("key2", "value2");
         map.put("key3", "value3");
-
         CountDownLatch latch = new CountDownLatch(1000);
         long startWith = System.currentTimeMillis();
 
