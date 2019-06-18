@@ -330,7 +330,22 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
+    @SuppressWarnings("all")
     public Map<String, Object> getAll(String... key) {
+
+        //获取全部
+        if (key.length == 0) {
+            Map<String, Object> productConf = registry.getProduct(getProductId()).getAll();
+            Map<String, Object> meConf = (Map<String, Object>) localCache.computeIfAbsent("__all", __ ->
+                    rMap.entrySet().stream()
+                            .filter(e -> e.getKey().startsWith("_cfg:"))
+                            .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue)));
+            Map<String, Object> all = new HashMap<>();
+
+            all.putAll(productConf);
+            all.putAll(meConf);
+            return all;
+        }
 
         Set<String> keSet = Stream.of(key)
                 .map(this::createConfigKey)
@@ -400,13 +415,18 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public void put(String key, Object value) {
+        Objects.requireNonNull(value, "value");
         rMap.fastPut(key = createConfigKey(key), value);
         confCache.put(key, value);
         changedListener.accept(true);
     }
 
     @Override
+    @SuppressWarnings("all")
     public void putAll(Map<String, Object> conf) {
+        if (conf == null || conf.isEmpty()) {
+            return;
+        }
         Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
@@ -417,10 +437,11 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
-    public void remove(String key) {
-        rMap.fastRemove(key = createConfigKey(key));
+    public Object remove(String key) {
+        Object val = rMap.remove(key = createConfigKey(key));
         confCache.remove(key);
         changedListener.accept(true);
+        return val;
     }
 
     void delete() {

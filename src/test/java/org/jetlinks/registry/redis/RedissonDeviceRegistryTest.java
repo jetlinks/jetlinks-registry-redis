@@ -1,5 +1,6 @@
 package org.jetlinks.registry.redis;
 
+import io.vavr.control.Try;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.device.*;
@@ -13,10 +14,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.redisson.api.RedissonClient;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -105,6 +103,29 @@ public class RedissonDeviceRegistryTest {
             Assert.assertEquals(conf.get("test_config"), "2345");
             Assert.assertEquals(conf.get("test_config2"), 1234);
             Assert.assertEquals(conf.get("test_config__"), "aaa");
+
+            Map<String, Object> all = operation.getAll();
+            Assert.assertEquals(all.get("test_config"), "2345");
+            Assert.assertEquals(all.get("test_config2"), 1234);
+            Assert.assertEquals(all.get("test_config__"), "aaa");
+            System.out.println(all);
+
+            Assert.assertEquals(operation.remove("test_config"), "2345");
+            Assert.assertTrue(operation.get("test_config").isPresent());
+
+            operation.putAll(all);
+            Assert.assertEquals(all.get("test_config"), "2345");
+
+            operation.putAll(null);
+            operation.putAll(Collections.emptyMap());
+
+            Assert.assertFalse(Try.of(() -> {
+
+                operation.put("test", null);
+
+                return true;
+            }).recover(NullPointerException.class, false).get());
+
 
         } finally {
             registry.unRegistry(info.getId());
