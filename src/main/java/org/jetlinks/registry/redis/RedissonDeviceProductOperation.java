@@ -22,6 +22,7 @@ import java.util.stream.Stream;
  * @since 1.0.0
  */
 @Slf4j
+@SuppressWarnings("all")
 public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     private RMap<String, Object> rMap;
@@ -66,7 +67,7 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
     @Override
     public void updateMetadata(String metadata) {
         rMap.fastPut("metadata", metadata);
-        localCache.put("metadata",metadata);
+        localCache.put("metadata", metadata);
     }
 
     @Override
@@ -116,9 +117,20 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         }
         return new DefaultValueWrapper(conf);
     }
+
     @Override
     @SuppressWarnings("all")
     public Map<String, Object> getAll(String... key) {
+
+        //获取全部
+        if (key.length == 0) {
+            return (Map<String, Object>) localCache.computeIfAbsent("__all", __ -> {
+                return rMap.entrySet().stream()
+                        .filter(e -> e.getKey().startsWith("_cfg:"))
+                        .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue));
+            });
+        }
+
         Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
 
         String cacheKey = String.valueOf(keSet.hashCode());
@@ -131,18 +143,21 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         if (cache instanceof NullValue) {
             return Collections.emptyMap();
         }
-        Map<String,Object> inRedis=Collections.unmodifiableMap(rMap.getAll(keSet)
+        Map<String, Object> inRedis = Collections.unmodifiableMap(rMap.getAll(keSet)
                 .entrySet()
                 .stream()
-                .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue,(_1,_2)->_1)));
+                .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue, (_1, _2) -> _1)));
 
-        localCache.put(cacheKey,inRedis);
+        localCache.put(cacheKey, inRedis);
 
         return inRedis;
     }
 
     @Override
     public void putAll(Map<String, Object> conf) {
+        if (conf == null || conf.isEmpty()) {
+            return;
+        }
         Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
@@ -158,8 +173,9 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
     }
 
     @Override
-    public void remove(String key) {
-        rMap.fastRemove(createConfigKey(key));
+    public Object remove(String key) {
+        Object val = rMap.fastRemove(createConfigKey(key));
         cacheChangedListener.run();
+        return val;
     }
 }
