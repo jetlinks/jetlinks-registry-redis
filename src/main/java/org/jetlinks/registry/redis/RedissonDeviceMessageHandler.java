@@ -62,11 +62,11 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     public CompletionStage<Boolean> reply(DeviceMessageReply message) {
         RBucket<DeviceMessageReply> bucket = redissonClient.getBucket("device:message:reply:".concat(message.getMessageId()));
         RSemaphore semaphore = redissonClient.getSemaphore("device:reply:".concat(message.getMessageId()));
-        bucket.expireAsync(replyExpireTimeSeconds, TimeUnit.SECONDS);
         semaphore.expireAsync(replyExpireTimeSeconds, TimeUnit.SECONDS);
         return bucket
                 .setAsync(message)
                 .thenApply(nil -> {
+                    bucket.expireAsync(replyExpireTimeSeconds, TimeUnit.SECONDS);
                     semaphore.releaseAsync();
                     return true;
                 });
