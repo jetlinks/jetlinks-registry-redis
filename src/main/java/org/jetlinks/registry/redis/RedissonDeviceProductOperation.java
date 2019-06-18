@@ -4,17 +4,15 @@ import com.alibaba.fastjson.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupport;
 import org.jetlinks.core.ProtocolSupports;
+import org.jetlinks.core.device.DeviceProductInfo;
+import org.jetlinks.core.device.DeviceProductOperation;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
 import org.jetlinks.core.metadata.DeviceMetadata;
 import org.jetlinks.core.metadata.NullValueWrapper;
 import org.jetlinks.core.metadata.ValueWrapper;
-import org.jetlinks.core.device.DeviceProductInfo;
-import org.jetlinks.core.device.DeviceProductOperation;
 import org.redisson.api.RMap;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -141,33 +139,6 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         localCache.put(cacheKey,inRedis);
 
         return inRedis;
-    }
-
-
-    @Override
-    @SuppressWarnings("all")
-    public CompletionStage<Map<String, Object>> getAllAsync(String... key) {
-        Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
-
-        String cacheKey = String.valueOf(keSet.hashCode());
-
-        Object cache = localCache.get(cacheKey);
-
-        if (cache instanceof Map) {
-            return CompletableFuture.completedFuture((Map) cache);
-        }
-        if (cache instanceof NullValue) {
-            return CompletableFuture.completedFuture(Collections.emptyMap());
-        }
-        return rMap.getAllAsync(keSet)
-                .thenApply((conf) -> {
-                    conf = conf.entrySet()
-                            .stream()
-                            .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue));
-
-                    localCache.put(cacheKey, conf);
-                    return conf;
-                });
     }
 
     @Override

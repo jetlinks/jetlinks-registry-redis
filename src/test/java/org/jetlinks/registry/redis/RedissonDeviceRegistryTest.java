@@ -100,7 +100,7 @@ public class RedissonDeviceRegistryTest {
             operation.put("test_config2", 1234);
 
             Assert.assertEquals(operation.get("test_config").asString().orElse(null), "2345");
-            conf = operation.getAllAsync("test_config", "test_config__", "test_config2").toCompletableFuture().get(10, TimeUnit.SECONDS);
+            conf = operation.getAll("test_config", "test_config__", "test_config2");
             System.out.println(conf);
             Assert.assertEquals(conf.get("test_config"), "2345");
             Assert.assertEquals(conf.get("test_config2"), 1234);

@@ -380,57 +380,6 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
-    @SuppressWarnings("all")
-    public CompletionStage<Map<String, Object>> getAllAsync(String... key) {
-
-        Set<String> keSet = Stream.of(key)
-                .map(this::createConfigKey)
-                .collect(Collectors.toSet());
-
-        String cacheKey = String.valueOf(keSet.hashCode());
-
-        Object cache = confCache.get(cacheKey);
-
-        if (cache instanceof Map) {
-            return CompletableFuture.completedFuture((Map) cache);
-        }
-        //null value 直接获取产品配置
-        if (cache instanceof NullValue) {
-            return registry.getProduct(getProductId()).getAllAsync(key);
-        }
-        return rMap
-                .getAllAsync(keSet)
-                .thenCompose(mine -> {
-                    if (mine.isEmpty()) {
-                        confCache.put(cacheKey, NullValue.instance);
-                        return registry
-                                .getProduct(getProductId())
-                                .getAllAsync(key);
-                    }
-                    //只有一部分,尝试从产品中获取
-                    if (mine.size() != key.length) {
-                        String[] inProductKey = keSet
-                                .stream()
-                                .filter(k -> !mine.containsKey(k))
-                                .map(this::recoverConfigKey)
-                                .toArray(String[]::new);
-
-                        return registry
-                                .getProduct(getProductId())
-                                .getAllAsync(inProductKey)
-                                .thenApply(productPart -> {
-                                    Map<String, Object> minePart = recoverConfigMap(mine);
-                                    minePart.putAll(productPart);
-                                    return minePart;
-                                });
-                    }
-                    Map<String, Object> recover = recoverConfigMap(mine);
-                    confCache.put(cacheKey, recover);
-                    return CompletableFuture.completedFuture(recover);
-                });
-    }
-
-    @Override
     public ValueWrapper get(String key) {
         String confKey = createConfigKey(key);
         Object val = tryGetFromConfCache(confKey);
