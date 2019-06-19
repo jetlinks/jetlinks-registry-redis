@@ -170,8 +170,6 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                         }
                         //使用信号量异步等待设备回复通知
                         RSemaphore semaphore = redissonClient.getSemaphore("device:reply:".concat(message.getMessageId()));
-                        //设置有效期,防止等待超时或者失败后,信号一直存在于redis中
-                        semaphore.expireAsync(maxSendAwaitSeconds + 10, TimeUnit.SECONDS);
                         return semaphore
                                 .tryAcquireAsync(deviceConnectedServerNumber.intValue(), maxSendAwaitSeconds, TimeUnit.SECONDS)
                                 .thenCompose(complete -> {
