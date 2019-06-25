@@ -3,6 +3,7 @@ package org.jetlinks.registry.redis;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang.StringUtils;
 import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
@@ -39,6 +40,9 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
         redissonClient
                 .getTopic("device:state:check:".concat(serviceId))
                 .addListener(String.class, (channel, msg) -> {
+                    if(StringUtils.isEmpty(msg)){
+                        return;
+                    }
                     consumer.accept(msg);
                     RSemaphore semaphore = redissonClient
                             .getSemaphore("device:state:check:semaphore:".concat(msg));
