@@ -57,6 +57,8 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     private DeviceMessageHandler deviceMessageHandler;
 
+    private RedissonDeviceMessageSender messageSender;
+
     public RedissonDeviceOperation(String deviceId,
                                    RedissonClient redissonClient,
                                    RMap<String, Object> rMap,
@@ -74,6 +76,8 @@ public class RedissonDeviceOperation implements DeviceOperation {
             clearCache(isConf);
             changedListener.accept(isConf);
         };
+        messageSender = new RedissonDeviceMessageSender(deviceId, redissonClient, deviceMessageHandler, this);
+        messageSender.setInterceptor(interceptor);
     }
 
     void clearCache(boolean isConf) {
@@ -277,9 +281,8 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceMessageSender messageSender() {
-        RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender(deviceId, redissonClient, deviceMessageHandler, this);
-        sender.setInterceptor(interceptor);
-        return sender;
+
+        return messageSender;
     }
 
     @Override

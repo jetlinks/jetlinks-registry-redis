@@ -23,7 +23,6 @@ import org.jetlinks.core.metadata.FunctionMetadata;
 import org.jetlinks.core.metadata.PropertyMetadata;
 import org.jetlinks.core.metadata.ValidateResult;
 import org.jetlinks.core.utils.IdUtils;
-import org.redisson.api.RSemaphore;
 import org.redisson.api.RedissonClient;
 
 import java.util.*;
@@ -47,13 +46,13 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
     private RedissonClient redissonClient;
 
-    private Supplier<String> connectionServerIdSupplier;
+    protected Supplier<String> connectionServerIdSupplier;
 
-    private Runnable deviceStateChecker;
+    protected Runnable deviceStateChecker;
 
-    private String deviceId;
+    protected String deviceId;
 
-    private DeviceOperation operation;
+    protected DeviceOperation operation;
 
     //从元数据中获取异步
     @Getter
@@ -62,7 +61,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
 
     @Getter
     @Setter
-    private DeviceMessageSenderInterceptor interceptor;
+    protected DeviceMessageSenderInterceptor interceptor;
 
     private DeviceMessageHandler messageHandler;
 
@@ -84,7 +83,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
     private int maxSendAwaitSeconds = Integer.getInteger("device.message.await.max-seconds", 30);
 
     @SuppressWarnings("all")
-    private <R extends DeviceMessageReply> R convertReply(Object deviceReply, RepayableDeviceMessage<R> message, Supplier<R> replyNewInstance) {
+    protected <R extends DeviceMessageReply> R convertReply(Object deviceReply, RepayableDeviceMessage<R> message, Supplier<R> replyNewInstance) {
         R reply = replyNewInstance.get();
         if (deviceReply == null) {
             reply.error(NO_REPLY);
@@ -108,6 +107,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
         return reply;
     }
 
+
     public <R extends DeviceMessageReply> CompletionStage<R> retrieveReply(String messageId, Supplier<R> replyNewInstance) {
         return redissonClient
                 .getBucket("device:message:reply:".concat(messageId))
@@ -120,6 +120,7 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
     }
 
     @Override
+    @SuppressWarnings("all")
     public <R extends DeviceMessageReply> CompletionStage<R> send(DeviceMessage requestMessage, Function<Object, R> replyMapping) {
         String serverId = connectionServerIdSupplier.get();
         //设备当前没有连接到任何服务器
@@ -147,77 +148,55 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                         }
                     });
         }
-        //发送消息给设备当前连接的服务器
-        redissonClient
-                .getTopic("device:message:accept:".concat(serverId))
-                .publishAsync(message)
-                .thenCompose(deviceConnectedServerNumber -> {
+        //在头中标记超时
+        int timeout = message.getHeader("timeout")
+                .map(Number.class::cast)
+                .map(Number::intValue)
+                .orElse(maxSendAwaitSeconds);
+
+        //处理返回结果,_reply可能为null,ErroCode,Object
+        BiConsumer<Object, Throwable> doReply = (_reply, error) -> {
+
+            CompletionStage<R> reply = CompletableFuture.completedFuture(replyMapping.apply(error != null ? ErrorCode.SYSTEM_ERROR : _reply))
+                    .thenApply(r -> {
+                        if (error != null) {
+                            r.addHeader("error", error.getMessage());
+                        }
+                        return r;
+                    });
+
+            if (interceptor != null) {
+                reply = reply.thenCompose(r -> interceptor.afterReply(operation, message, r));
+            }
+            reply.whenComplete((r, throwable) -> {
+                if (throwable != null) {//理论上不会出现
+                    future.completeExceptionally(throwable);
+                } else {
+                    future.complete(r);
+                }
+            });
+        };
+        //监听返回
+        messageHandler.handleReply(message.getMessageId(), timeout, TimeUnit.SECONDS).whenComplete(doReply);
+
+        //发送消息
+        messageHandler.send(serverId, message)
+                .whenComplete((deviceConnectedServerNumber, error) -> {
+                    if (error != null) {
+                        log.error("发送消息到设备网关服务失败:{}", message, error);
+                        return;
+                    }
                     if (deviceConnectedServerNumber <= 0) {
                         //没有任何服务消费此topic,可能所在服务器已经宕机,注册信息没有更新。
                         //执行设备状态检查,尝试更新设备的真实状态
                         if (deviceStateChecker != null) {
                             deviceStateChecker.run();
                         }
-                        return CompletableFuture.completedFuture(ErrorCode.CLIENT_OFFLINE);
+                        doReply.accept(ErrorCode.CLIENT_OFFLINE, null);
                     }
                     //有多个相同名称的设备网关服务,可能是服务配置错误,启动了多台相同id的服务。
                     if (deviceConnectedServerNumber > 1) {
                         log.warn("存在多个相同的网关服务:{}", serverId);
-                    }
-                    try {
-                        if (log.isDebugEnabled()) {
-                            log.debug("发送设备消息[{}]=>{}", message.getDeviceId(), message);
-                        }
-                        //使用信号量异步等待设备回复通知
-                        RSemaphore semaphore = redissonClient.getSemaphore("device:reply:".concat(message.getMessageId()));
-                        return semaphore
-                                .tryAcquireAsync(deviceConnectedServerNumber.intValue(), maxSendAwaitSeconds, TimeUnit.SECONDS)
-                                .thenCompose(complete -> {
-                                    try {
-                                        if (complete && future.isCancelled()) {
-                                            log.debug("设备消息[{}]回复成功,但是已经取消了等待!",
-                                                    message.getMessageId());
-
-                                            return CompletableFuture.completedFuture(null);
-                                        }
-                                        if (!complete) {
-                                            if (!future.isCancelled()) {
-                                                log.warn("等待设备消息回复超时,超时时间:{}s,可通过配置:device.message.await.max-seconds进行修改", maxSendAwaitSeconds);
-                                            }
-                                            return CompletableFuture.completedFuture(null);
-                                        }
-                                        return redissonClient
-                                                .getBucket("device:message:reply:".concat(message.getMessageId()))
-                                                .getAndDeleteAsync()
-                                                .whenComplete((r, err) -> {
-                                                    if (r != null && log.isDebugEnabled()) {
-                                                        log.debug("收到设备回复消息[{}]<={}", message.getDeviceId(), r);
-                                                    }
-                                                });
-                                    } finally {
-                                        //删除信号
-                                        semaphore.deleteAsync();
-                                    }
-                                });
-
-                    } catch (Exception e) {
-                        //异常直接返回错误
-                        log.error(e.getMessage(), e);
-                        return CompletableFuture.completedFuture(ErrorCode.SYSTEM_ERROR);
-                    }
-                })
-                .thenApply(replyMapping)
-                .thenCompose(r -> {
-                    if (interceptor != null) {
-                        return interceptor.afterReply(operation, message, r);
-                    }
-                    return CompletableFuture.completedFuture(r);
-                })
-                .whenComplete((r, throwable) -> {
-                    if (throwable != null) {
-                        future.completeExceptionally(throwable);
-                    } else {
-                        future.complete(r);
                     }
                 });
 

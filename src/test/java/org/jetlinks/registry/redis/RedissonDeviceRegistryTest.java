@@ -35,8 +35,9 @@ public class RedissonDeviceRegistryTest {
     public void init() {
         RedissonClient client = RedissonHelper.newRedissonClient();
 
+
         messageHandler = new RedissonDeviceMessageHandler(client);
-        registry = new RedissonDeviceRegistry(RedissonHelper.newRedissonClient(), messageHandler, new MockProtocolSupports());
+        registry = new RedissonDeviceRegistry(client, messageHandler, new MockProtocolSupports());
         registry.addInterceptor(new DeviceMessageSenderInterceptor() {
             @Override
             public DeviceMessage preSend(DeviceOperation device, DeviceMessage message) {
