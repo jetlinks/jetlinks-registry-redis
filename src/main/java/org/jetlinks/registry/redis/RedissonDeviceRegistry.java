@@ -117,8 +117,10 @@ public class RedissonDeviceRegistry implements DeviceRegistry {
                 client.getMap(deviceId.concat(":reg")),
                 protocolSupports,
                 messageHandler,
-                this, (isConf) -> cacheChangedTopic.publishAsync(deviceId.concat("@").concat(isConf ? "1" : "0")));
-        operation.setInterceptor(interceptor);
+                this,
+                interceptor,
+                (isConf) -> cacheChangedTopic.publishAsync(deviceId.concat("@").concat(isConf ? "1" : "0")));
+//        operation.setInterceptor(interceptor);
 
         return operation;
     }

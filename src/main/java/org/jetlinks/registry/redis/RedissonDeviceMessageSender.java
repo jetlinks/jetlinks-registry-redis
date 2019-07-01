@@ -157,7 +157,8 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
         //处理返回结果,_reply可能为null,ErroCode,Object
         BiConsumer<Object, Throwable> doReply = (_reply, error) -> {
 
-            CompletionStage<R> reply = CompletableFuture.completedFuture(replyMapping.apply(error != null ? ErrorCode.SYSTEM_ERROR : _reply))
+            CompletionStage<R> reply = CompletableFuture
+                    .completedFuture(replyMapping.apply(error != null ? ErrorCode.SYSTEM_ERROR : _reply))
                     .thenApply(r -> {
                         if (error != null) {
                             r.addHeader("error", error.getMessage());

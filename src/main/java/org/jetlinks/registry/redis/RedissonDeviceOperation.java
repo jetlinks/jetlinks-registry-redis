@@ -55,7 +55,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     @Getter
     private DeviceMessageSenderInterceptor interceptor;
 
-    private DeviceMessageHandler deviceMessageHandler;
+//    private DeviceMessageHandler deviceMessageHandler;
 
     private RedissonDeviceMessageSender messageSender;
 
@@ -65,13 +65,15 @@ public class RedissonDeviceOperation implements DeviceOperation {
                                    ProtocolSupports protocolSupports,
                                    DeviceMessageHandler deviceMessageHandler,
                                    DeviceRegistry registry,
+                                   DeviceMessageSenderInterceptor interceptor,
                                    Consumer<Boolean> changedListener) {
         this.deviceId = deviceId;
         this.redissonClient = redissonClient;
         this.rMap = rMap;
         this.protocolSupports = protocolSupports;
         this.registry = registry;
-        this.deviceMessageHandler = deviceMessageHandler;
+//        this.deviceMessageHandler = deviceMessageHandler;
+        this.interceptor=interceptor;
         this.changedListener = (isConf) -> {
             clearCache(isConf);
             changedListener.accept(isConf);
@@ -79,6 +81,8 @@ public class RedissonDeviceOperation implements DeviceOperation {
         messageSender = new RedissonDeviceMessageSender(deviceId, redissonClient, deviceMessageHandler, this);
         messageSender.setInterceptor(interceptor);
     }
+
+
 
     void clearCache(boolean isConf) {
         if (isConf) {

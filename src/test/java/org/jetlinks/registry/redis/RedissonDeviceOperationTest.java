@@ -1,9 +1,9 @@
 package org.jetlinks.registry.redis;
 
 import lombok.SneakyThrows;
+import org.jetlinks.core.device.DeviceMessageSender;
 import org.jetlinks.core.device.DeviceOperation;
 import org.jetlinks.core.device.DeviceState;
-import org.jetlinks.core.device.registry.DeviceRegistry;
 import org.jetlinks.core.enums.ErrorCode;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
@@ -12,6 +12,7 @@ import org.jetlinks.core.message.exception.FunctionUndefinedException;
 import org.jetlinks.core.message.exception.IllegalParameterException;
 import org.jetlinks.core.message.exception.ParameterUndefinedException;
 import org.jetlinks.core.message.function.FunctionInvokeMessageReply;
+import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.message.property.ReadPropertyMessage;
 import org.jetlinks.core.message.property.ReadPropertyMessageReply;
 import org.jetlinks.core.support.JetLinksProtocolSupport;
@@ -23,9 +24,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.util.StreamUtils;
 
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static io.vavr.API.Try;
@@ -35,13 +34,26 @@ public class RedissonDeviceOperationTest {
     RedissonClient client = RedissonHelper.newRedissonClient();
 
 
-    public DeviceRegistry registry;
+    public RedissonDeviceRegistry registry;
 
     @Before
     public void init() {
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
         registry = new RedissonDeviceRegistry(client,new RedissonDeviceMessageHandler(client), protocol -> jetLinksProtocolSupport);
+
+        registry.addInterceptor(new DeviceMessageSenderInterceptor() {
+            @Override
+            public DeviceMessage preSend(DeviceOperation device, DeviceMessage message) {
+                return message;
+            }
+
+            @Override
+            public <R extends DeviceMessageReply> CompletionStage<R> afterReply(DeviceOperation device, DeviceMessage message, R reply) {
+                reply.addHeader("ts",System.currentTimeMillis());
+                return CompletableFuture.completedFuture(reply);
+            }
+        });
     }
 
     //设备网关服务宕机
@@ -120,7 +132,8 @@ public class RedissonDeviceOperationTest {
         try {
             DeviceOperation operation = registry.getDevice("test2");
             operation.online("test-server", "12");
-            RedissonDeviceMessageSender sender = new RedissonDeviceMessageSender("test2", client, new RedissonDeviceMessageHandler(client),operation);
+            DeviceMessageSender sender = operation.messageSender();
+
 
             RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
@@ -155,6 +168,7 @@ public class RedissonDeviceOperationTest {
             Assert.assertNotNull(messageReference.get());
             Assert.assertTrue(messageReference.get() instanceof ReadPropertyMessage);
             Assert.assertNotNull(reply);
+            System.out.println(reply);
 
             messageReference.set(null);
 
