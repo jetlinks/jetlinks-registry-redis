@@ -88,7 +88,7 @@ public class RedissonDeviceOperationTest {
     @Test
     public void testSendOfflineServer() {
         DeviceOperation operation = registry.getDevice("test2");
-        operation.online("test2-server", "test");
+        operation.online("test3-server", "test");
 
         Assert.assertEquals(operation.getState(),DeviceState.online);
 
