@@ -73,8 +73,7 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
                     .forEach((e) -> {
                         try {
                             CompletableFuture<Object> future = e.getValue().future;
-                            if (!future.isCancelled()) {
-                                future.complete(ErrorCode.TIME_OUT);
+                            if (future.isCancelled()) {
                                 return;
                             }
                             redissonClient.getBucket("device:message:reply:".concat(e.getKey()))
@@ -83,7 +82,7 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
                                         if (o != null) {
                                             future.complete(o);
                                         } else {
-                                            future.completeExceptionally(throwable);
+                                            future.complete(ErrorCode.TIME_OUT);
                                         }
                                     });
 
@@ -126,6 +125,8 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     @AllArgsConstructor
     @Getter
     private class MessageFuture {
+        private String messageId;
+
         private CompletableFuture<Object> future;
 
         private long expireTime;
@@ -134,7 +135,7 @@ public class RedissonDeviceMessageHandler implements DeviceMessageHandler {
     @Override
     public CompletionStage<Object> handleReply(String messageId, long timeout, TimeUnit timeUnit) {
         CompletableFuture<Object> future = new CompletableFuture<>();
-        futureMap.put(messageId, new MessageFuture(future, System.currentTimeMillis() + timeUnit.toMillis(timeout)));
+        futureMap.put(messageId, new MessageFuture(messageId, future, System.currentTimeMillis() + timeUnit.toMillis(timeout)));
 
         return future;
     }

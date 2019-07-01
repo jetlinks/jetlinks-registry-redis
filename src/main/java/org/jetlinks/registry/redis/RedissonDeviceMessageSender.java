@@ -176,14 +176,24 @@ public class RedissonDeviceMessageSender implements DeviceMessageSender {
                 }
             });
         };
-        //监听返回
-        messageHandler.handleReply(message.getMessageId(), timeout, TimeUnit.SECONDS).whenComplete(doReply);
 
+        //监听返回
+        CompletionStage<Object> stage = messageHandler.handleReply(message.getMessageId(), timeout, TimeUnit.SECONDS);
+
+        stage.whenComplete(doReply);
+
+        future.whenComplete((r, err) -> {
+            if (future.isCancelled()) {
+                log.info("取消等待设备[{}]消息[{}]返回", deviceId,message.getMessageId());
+                stage.toCompletableFuture().cancel(true);
+            }
+        });
         //发送消息
         messageHandler.send(serverId, message)
                 .whenComplete((deviceConnectedServerNumber, error) -> {
                     if (error != null) {
                         log.error("发送消息到设备网关服务失败:{}", message, error);
+                        doReply.accept(ErrorCode.SYSTEM_ERROR, error);
                         return;
                     }
                     if (deviceConnectedServerNumber <= 0) {
