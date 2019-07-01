@@ -5,9 +5,7 @@ import org.jetlinks.core.device.DeviceMessageSender;
 import org.jetlinks.core.device.DeviceOperation;
 import org.jetlinks.core.device.DeviceState;
 import org.jetlinks.core.enums.ErrorCode;
-import org.jetlinks.core.message.DeviceMessage;
-import org.jetlinks.core.message.DeviceMessageReply;
-import org.jetlinks.core.message.RepayableDeviceMessage;
+import org.jetlinks.core.message.*;
 import org.jetlinks.core.message.exception.FunctionUndefinedException;
 import org.jetlinks.core.message.exception.IllegalParameterException;
 import org.jetlinks.core.message.exception.ParameterUndefinedException;
@@ -40,7 +38,7 @@ public class RedissonDeviceOperationTest {
     public void init() {
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
-        registry = new RedissonDeviceRegistry(client,new RedissonDeviceMessageHandler(client), protocol -> jetLinksProtocolSupport);
+        registry = new RedissonDeviceRegistry(client, new RedissonDeviceMessageHandler(client), protocol -> jetLinksProtocolSupport);
 
         registry.addInterceptor(new DeviceMessageSenderInterceptor() {
             @Override
@@ -50,7 +48,7 @@ public class RedissonDeviceOperationTest {
 
             @Override
             public <R extends DeviceMessageReply> CompletionStage<R> afterReply(DeviceOperation device, DeviceMessage message, R reply) {
-                reply.addHeader("ts",System.currentTimeMillis());
+                reply.addHeader("ts", System.currentTimeMillis());
                 return CompletableFuture.completedFuture(reply);
             }
         });
@@ -87,6 +85,23 @@ public class RedissonDeviceOperationTest {
 
     }
 
+    @Test
+    public void testSendOfflineServer() {
+        DeviceOperation operation = registry.getDevice("test2");
+        operation.online("test2-server", "test");
+
+        Assert.assertEquals(operation.getState(),DeviceState.online);
+
+        Assert.assertEquals(operation.messageSender()
+                .readProperty("test")
+                .custom(Headers.async.setter())
+                .trySend(10, TimeUnit.SECONDS)
+                .map(CommonDeviceMessageReply::getCode)
+                .get(), ErrorCode.CLIENT_OFFLINE.name());
+
+        Assert.assertEquals(operation.getState(),DeviceState.offline);
+
+    }
 
     //设备网关服务正常运行，但是设备未连接到当前网关服务
     //场景: 设备网关宕机，未及时将设备更新为离线。当网关服务重新启动后，设备其实已经没有连接到这台服务器了。
@@ -137,8 +152,8 @@ public class RedissonDeviceOperationTest {
 
             RedissonDeviceMessageHandler handler = new RedissonDeviceMessageHandler(client);
 
-            handler.markMessageAsync("testId").toCompletableFuture().get(10,TimeUnit.SECONDS);
-            Assert.assertTrue(handler.messageIsAsync("testId").toCompletableFuture().get(10,TimeUnit.SECONDS));
+            handler.markMessageAsync("testId").toCompletableFuture().get(10, TimeUnit.SECONDS);
+            Assert.assertTrue(handler.messageIsAsync("testId").toCompletableFuture().get(10, TimeUnit.SECONDS));
 
             AtomicReference<DeviceMessage> messageReference = new AtomicReference<>();
             //处理发往设备的消息
@@ -177,7 +192,7 @@ public class RedissonDeviceOperationTest {
                     .trySend(1, TimeUnit.MILLISECONDS);
 
             TimeUnit.SECONDS.sleep(5);
-            ReadPropertyMessageReply retrieve =   sender.readProperty("test")
+            ReadPropertyMessageReply retrieve = sender.readProperty("test")
                     .messageId("test-retrieve-msg")
                     .retrieveReply()
                     .toCompletableFuture()
