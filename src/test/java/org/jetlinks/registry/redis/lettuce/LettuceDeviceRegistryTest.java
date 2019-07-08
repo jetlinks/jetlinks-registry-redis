@@ -1,4 +1,4 @@
-package org.jetlinks.registry.redis;
+package org.jetlinks.registry.redis.lettuce;
 
 import io.vavr.control.Try;
 import lombok.SneakyThrows;
@@ -9,10 +9,12 @@ import org.jetlinks.core.message.CommonDeviceMessageReply;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
 import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
+import org.jetlinks.lettuce.LettucePlus;
+import org.jetlinks.lettuce.supports.DefaultLettucePlus;
+import org.jetlinks.registry.redis.MockProtocolSupports;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.redisson.api.RedissonClient;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -25,19 +27,21 @@ import java.util.concurrent.TimeUnit;
  * @since 1.0.0
  */
 @Slf4j
-public class RedissonDeviceRegistryTest {
+public class LettuceDeviceRegistryTest {
 
-    private RedissonDeviceRegistry registry;
+    private LettuceDeviceRegistry registry;
 
     private DeviceMessageHandler messageHandler;
 
     @Before
     public void init() {
-        RedissonClient client = RedissonHelper.newRedissonClient();
+        LettucePlus client = DefaultLettucePlus.standalone( RedisClientHelper.createRedisClient());
 
 
-        messageHandler = new RedissonDeviceMessageHandler(client);
-        registry = new RedissonDeviceRegistry(client, messageHandler, new MockProtocolSupports());
+        messageHandler = new LettuceDeviceMessageHandler(client);
+
+        registry = new LettuceDeviceRegistry(client, messageHandler, new MockProtocolSupports());
+
         registry.addInterceptor(new DeviceMessageSenderInterceptor() {
             @Override
             public DeviceMessage preSend(DeviceOperation device, DeviceMessage message) {

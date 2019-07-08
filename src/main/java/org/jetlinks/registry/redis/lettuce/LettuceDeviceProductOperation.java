@@ -1,6 +1,12 @@
-package org.jetlinks.registry.redis;
+package org.jetlinks.registry.redis.lettuce;
 
 import com.alibaba.fastjson.JSON;
+import io.lettuce.core.KeyValue;
+import io.lettuce.core.Value;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.lettuce.core.api.sync.RedisCommands;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupport;
 import org.jetlinks.core.ProtocolSupports;
@@ -10,12 +16,14 @@ import org.jetlinks.core.metadata.DefaultValueWrapper;
 import org.jetlinks.core.metadata.DeviceMetadata;
 import org.jetlinks.core.metadata.NullValueWrapper;
 import org.jetlinks.core.metadata.ValueWrapper;
-import org.redisson.api.RMap;
+import org.jetlinks.lettuce.LettucePlus;
+import org.jetlinks.registry.redis.NullValue;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -25,9 +33,7 @@ import java.util.stream.Stream;
  */
 @Slf4j
 @SuppressWarnings("all")
-public class RedissonDeviceProductOperation implements DeviceProductOperation {
-
-    private RMap<String, Object> rMap;
+public class LettuceDeviceProductOperation implements DeviceProductOperation {
 
     private Map<String, Object> localCache = new ConcurrentHashMap<>(32);
 
@@ -36,10 +42,17 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     private Runnable cacheChangedListener;
 
+    private LettucePlus plus;
 
-    public RedissonDeviceProductOperation(RMap<String, Object> rMap, ProtocolSupports protocolSupports, Runnable cacheChangedListener) {
-        this.rMap = rMap;
+    private String redisKey;
+
+    public LettuceDeviceProductOperation(String redisKey,
+                                         LettucePlus plus,
+                                         ProtocolSupports protocolSupports,
+                                         Runnable cacheChangedListener) {
+        this.plus = plus;
         this.protocolSupports = protocolSupports;
+        this.redisKey = redisKey;
         this.cacheChangedListener = () -> {
             localCache.clear();
             cacheChangedListener.run();
@@ -59,16 +72,33 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @SuppressWarnings("all")
     private <T> T tryGetFromLocalCache(String key) {
-        Object val = localCache.computeIfAbsent(key, k -> Optional.ofNullable(rMap.get(k)).orElse(NullValue.instance));
+        Object val = localCache.computeIfAbsent(key, k -> {
+            return Optional.ofNullable(getSyncRedis().hget(redisKey, key))
+                    .orElse(NullValue.instance);
+        });
         if (val == NullValue.instance) {
             return null;
         }
         return (T) val;
     }
 
+    @SneakyThrows
+    private <K, V> RedisCommands<K, V> getSyncRedis() {
+        return plus.<K, V>getConnection()
+                .thenApply(conn -> conn.sync())
+                .toCompletableFuture()
+                .get(10, TimeUnit.SECONDS);
+    }
+
+    protected <K, V> CompletionStage<RedisAsyncCommands<K, V>> getAsyncRedis() {
+        return plus
+                .<K, V>getConnection()
+                .thenApply(StatefulRedisConnection::async);
+    }
+
     @Override
     public void updateMetadata(String metadata) {
-        rMap.fastPut("metadata", metadata);
+        getSyncRedis().hset(redisKey, "metadata", metadata);
         localCache.put("metadata", metadata);
     }
 
@@ -93,7 +123,8 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         if (info.getProtocol() != null) {
             all.put("protocol", info.getProtocol());
         }
-        rMap.putAll(all);
+        getSyncRedis().hmset(redisKey, (Map) all);
+
         localCache.putAll(all);
         cacheChangedListener.run();
     }
@@ -122,20 +153,26 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public CompletionStage<Map<String, Object>> getAllAsync(String... key) {
-        return CompletableFuture.supplyAsync(()->getAll(key));
-    }
-
-    @Override
-    @SuppressWarnings("all")
-    public Map<String, Object> getAll(String... key) {
-
-        //获取全部
         if (key.length == 0) {
-            return (Map<String, Object>) localCache.computeIfAbsent("__all", __ -> {
-                return rMap.entrySet().stream()
-                        .filter(e -> e.getKey().startsWith("_cfg:"))
-                        .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue));
-            });
+            if (localCache.containsKey("__all")) {
+                return CompletableFuture.completedFuture((Map<String, Object>) localCache.get("__all"));
+            } else {
+                return this.<String,Object>getAsyncRedis()
+                        .thenCompose(redis -> {
+                            return redis.hgetall(redisKey);
+                        })
+                        .thenApply(all -> {
+                            return all
+                                    .entrySet()
+                                    .stream()
+                                    .filter(kv -> String.valueOf(kv.getKey()).startsWith("_cfg:"))
+                                    .collect(Collectors.toMap(e -> recoverConfigKey(String.valueOf(e.getKey())), Map.Entry::getValue));
+                        }).whenComplete((all, error) -> {
+                            if (all != null) {
+                                localCache.put("__all", all);
+                            }
+                        });
+            }
         }
 
         Set<String> keSet = Stream.of(key).map(this::createConfigKey).collect(Collectors.toSet());
@@ -145,19 +182,31 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         Object cache = localCache.get(cacheKey);
 
         if (cache instanceof Map) {
-            return (Map) cache;
+            return CompletableFuture.completedFuture((Map) cache);
         }
         if (cache instanceof NullValue) {
-            return Collections.emptyMap();
+            return CompletableFuture.completedFuture(Collections.emptyMap());
         }
-        Map<String, Object> inRedis = Collections.unmodifiableMap(rMap.getAll(keSet)
-                .entrySet()
-                .stream()
-                .collect(Collectors.toMap(e -> recoverConfigKey(e.getKey()), Map.Entry::getValue, (_1, _2) -> _1)));
+        return getAsyncRedis()
+                .thenCompose(redis -> {
+                    return redis.hmget(redisKey, keSet.toArray());
+                })
+                .thenApply(kv -> kv.stream()
+                        .filter(Value::hasValue)
+                        .collect(Collectors.toMap(e -> recoverConfigKey(String.valueOf(e.getKey())), KeyValue::getValue, (_1, _2) -> _1)))
+                .whenComplete((map, err) -> {
+                    if (map != null) {
+                        localCache.put(cacheKey, map);
+                    }
+                });
+    }
 
-        localCache.put(cacheKey, inRedis);
+    @Override
+    @SuppressWarnings("all")
+    @SneakyThrows
+    public Map<String, Object> getAll(String... key) {
 
-        return inRedis;
+        return getAllAsync(key).toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
     @Override
@@ -165,23 +214,25 @@ public class RedissonDeviceProductOperation implements DeviceProductOperation {
         if (conf == null || conf.isEmpty()) {
             return;
         }
-        Map<String, Object> newMap = new HashMap<>();
+        Map<Object, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
-        rMap.putAll(newMap);
+        getSyncRedis().hmset(redisKey, newMap);
         cacheChangedListener.run();
     }
 
     @Override
     public void put(String key, Object value) {
-        rMap.fastPut(createConfigKey(key), value);
+        getSyncRedis().hset(redisKey, createConfigKey(key), value);
         cacheChangedListener.run();
     }
 
     @Override
     public Object remove(String key) {
-        Object val = rMap.fastRemove(createConfigKey(key));
+        Object val =get(key).value().orElse(null);
+        getSyncRedis().hdel(redisKey, key);
+
         cacheChangedListener.run();
         return val;
     }
