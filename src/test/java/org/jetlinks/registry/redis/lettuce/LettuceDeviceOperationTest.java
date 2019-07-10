@@ -218,7 +218,7 @@ public class LettuceDeviceOperationTest {
             DeviceOperation operation = registry.getDevice("test3");
             String metaData = StreamUtils.copyToString(new ClassPathResource("testValidateParameter.meta.json").getInputStream(), StandardCharsets.UTF_8);
             operation.updateMetadata(metaData);
-
+            Thread.sleep(100);
             Assert.assertNotNull(operation.getMetadata());
 
             //function未定义

@@ -17,9 +17,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 
 /**
@@ -35,7 +33,7 @@ public class LettuceDeviceRegistryTest {
 
     @Before
     public void init() {
-        LettucePlus client = DefaultLettucePlus.standalone( RedisClientHelper.createRedisClient());
+        LettucePlus client = DefaultLettucePlus.standalone(RedisClientHelper.createRedisClient());
 
 
         messageHandler = new LettuceDeviceMessageHandler(client);
@@ -135,6 +133,46 @@ public class LettuceDeviceRegistryTest {
         } finally {
             registry.unRegistry(info.getId());
         }
+    }
+
+    @Test
+    @SneakyThrows
+    public void testBenchmark() {
+        DeviceInfo info = newDeviceInfo();
+        DeviceProductInfo productInfo = new DeviceProductInfo();
+        productInfo.setId("test2");
+        productInfo.setName("测试");
+        productInfo.setProjectId("test");
+        productInfo.setProtocol("jet-links");
+        info.setProductId(productInfo.getId());
+
+        registry.registry(info);
+
+        registry.getProduct(productInfo.getId()).update(productInfo);
+
+        registry.getProduct(productInfo.getId()).put("test", "1234");
+        Thread.sleep(100);
+
+        long time = System.currentTimeMillis();
+
+        CountDownLatch latch=new CountDownLatch(10000);
+        ExecutorService executorService=Executors.newFixedThreadPool(32);
+        for (int i = 0; i < 10000; i++) {
+            int fi = i;
+            CompletableFuture.runAsync(() -> {
+                try {
+                    registry.getDevice(info.getId()).put("test", 123);
+                    registry.getDevice(info.getId()).get("test:" + fi);
+                }catch (Exception e){
+                    e.printStackTrace();
+                }finally {
+                    latch.countDown();
+                }
+            },executorService);
+        }
+        latch.await(30,TimeUnit.SECONDS);
+        executorService.shutdown();
+        System.out.println(System.currentTimeMillis() - time);
     }
 
     @Test

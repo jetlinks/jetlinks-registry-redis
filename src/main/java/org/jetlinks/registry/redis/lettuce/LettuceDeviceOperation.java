@@ -5,7 +5,6 @@ import io.lettuce.core.KeyValue;
 import io.lettuce.core.Value;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
-import io.lettuce.core.api.sync.RedisCommands;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.SneakyThrows;
@@ -29,6 +28,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -81,15 +81,6 @@ public class LettuceDeviceOperation implements DeviceOperation {
         messageSender.setInterceptor(interceptor);
     }
 
-
-    @SneakyThrows
-    private <K, V> RedisCommands<K, V> getSyncRedis() {
-        return plus.<K, V>getConnection()
-                .thenApply(StatefulRedisConnection::sync)
-                .toCompletableFuture()
-                .get(10, TimeUnit.SECONDS);
-    }
-
     protected <K, V> CompletionStage<RedisAsyncCommands<K, V>> getAsyncRedis() {
         return plus
                 .<K, V>getConnection()
@@ -110,19 +101,43 @@ public class LettuceDeviceOperation implements DeviceOperation {
         return deviceId;
     }
 
+
+    @SneakyThrows
+    private <K, V, T> T executeSync(Function<RedisAsyncCommands<K, V>, CompletionStage<T>> function) {
+        return this.<K, V>getAsyncRedis()
+                .thenCompose(function)
+                .toCompletableFuture()
+                .get(10, TimeUnit.SECONDS);
+    }
+
+    private <K, V> void executeAsync(Consumer<RedisAsyncCommands<K, V>> consumer) {
+        this.<K, V>getAsyncRedis()
+                .thenAccept(consumer);
+    }
+
     @SuppressWarnings("all")
     private <T> T tryGetFromLocalCache(String key) {
-        Object val = localCache.computeIfAbsent(key, k -> Optional.ofNullable(getSyncRedis().hget(redisKey, key)).orElse(NullValue.instance));
+        Object val = localCache.get(key);
         if (val == NullValue.instance) {
             return null;
+        }
+        if (val != null) {
+            return (T) val;
+        } else {
+            localCache.put(key, Optional.ofNullable(val = executeSync(redis -> redis.hget(redisKey, key))).orElse(NullValue.instance));
         }
         return (T) val;
     }
 
     private <T> T tryGetFromConfCache(String key) {
-        Object val = confCache.computeIfAbsent(key, k -> Optional.ofNullable(getSyncRedis().hget(redisKey, key)).orElse(NullValue.instance));
+        Object val = confCache.get(key);
         if (val == NullValue.instance) {
             return null;
+        }
+        if (val != null) {
+            return (T) val;
+        } else {
+            confCache.put(key, Optional.ofNullable(val = executeSync(redis -> redis.hget(redisKey, key))).orElse(NullValue.instance));
         }
         return (T) val;
     }
@@ -156,9 +171,8 @@ public class LettuceDeviceOperation implements DeviceOperation {
     public void putState(byte state) {
         localCache.put("state", state);
 
-        getSyncRedis().hset(redisKey, "state", state);
+        executeAsync(redis -> redis.hset(redisKey, "state", state).thenRun(() -> changedListener.accept(false)));
 
-        changedListener.accept(false);
     }
 
     @Override
@@ -192,14 +206,14 @@ public class LettuceDeviceOperation implements DeviceOperation {
 
     @Override
     public long getOnlineTime() {
-        return Optional.ofNullable(getSyncRedis().hget(redisKey, "onlineTime"))
+        return Optional.ofNullable(executeSync(redis -> redis.hget(redisKey, "onlineTime")))
                 .map(Long.class::cast)
                 .orElse(-1L);
     }
 
     @Override
     public long getOfflineTime() {
-        return Optional.ofNullable(getSyncRedis().hget(redisKey, "offlineTime"))
+        return Optional.ofNullable(executeSync(redis -> redis.hget(redisKey, "offlineTime")))
                 .map(Long.class::cast)
                 .orElse(-1L);
     }
@@ -213,8 +227,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
         map.put("onlineTime", System.currentTimeMillis());
         localCache.putAll(map);
 
-        this.<String, Object>getSyncRedis().hmset(redisKey, map);
-        changedListener.accept(false);
+        this.<String, Object>executeAsync(redis -> redis.hmset(redisKey, map).thenRun(() -> changedListener.accept(false)));
     }
 
     @Override
@@ -226,8 +239,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
         map.put("sessionId", "");
         localCache.putAll(map);
 
-        this.<String, Object>getSyncRedis().hmset(redisKey, map);
-        changedListener.accept(false);
+        this.<String, Object>executeAsync(redis -> redis.hmset(redisKey, map).thenRun(() -> changedListener.accept(false)));
     }
 
     @Override
@@ -245,8 +257,8 @@ public class LettuceDeviceOperation implements DeviceOperation {
     @Override
     public DeviceMetadata getMetadata() {
 
-        Map<String, Object> deviceInfo = this.<String, Object>getSyncRedis()
-                .hmget(redisKey, "metadata", "protocol", "productId")
+        Map<String, Object> deviceInfo = this.<String, Object, List<KeyValue<String, Object>>>
+                executeSync(redis -> redis.hmget(redisKey, "metadata", "protocol", "productId"))
                 .stream()
                 .filter(Value::hasValue)
                 .collect(Collectors.toMap(KeyValue::getKey, KeyValue::getValue));
@@ -291,7 +303,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
 
     @Override
     public DeviceInfo getDeviceInfo() {
-        Object info = getSyncRedis().hget(redisKey, "info");
+        Object info = tryGetFromLocalCache("info");
         if (info instanceof String) {
             return JSON.parseObject((String) info, DeviceInfo.class);
         }
@@ -306,20 +318,25 @@ public class LettuceDeviceOperation implements DeviceOperation {
     public void update(DeviceInfo deviceInfo) {
         Map<String, Object> all = new HashMap<>();
         all.put("info", JSON.toJSONString(deviceInfo));
+        localCache.put("info", deviceInfo);
         if (deviceInfo.getProtocol() != null) {
             all.put("protocol", deviceInfo.getProtocol());
+            localCache.put("protocol", deviceInfo.getProtocol());
         }
         if (deviceInfo.getProductId() != null) {
             all.put("productId", deviceInfo.getProductId());
+            localCache.put("productId", deviceInfo.getProtocol());
         }
-        this.<String, Object>getSyncRedis().hmset(redisKey, all);
-        changedListener.accept(false);
+
+        this.<String, Object>executeAsync(redis -> redis.hmset(redisKey, all).thenRun(() -> changedListener.accept(false)));
     }
 
     @Override
     public void updateMetadata(String metadata) {
-        changedListener.accept(false);
-        getSyncRedis().hset(redisKey, "metadata", metadata);
+        localCache.put("metadata", metadata);
+
+        this.executeAsync(redis -> redis.hset(redisKey, "metadata", metadata)
+                .thenRun(() -> changedListener.accept(false)));
     }
 
     private String createConfigKey(String key) {
@@ -343,8 +360,8 @@ public class LettuceDeviceOperation implements DeviceOperation {
         if (key.length == 0) {
             Map<String, Object> productConf = registry.getProduct(getProductId()).getAll();
             Map<String, Object> meConf = (Map<String, Object>) localCache.computeIfAbsent("__all", __ ->
-                    this.<String, Object>getSyncRedis()
-                            .hgetall(redisKey)
+                    this.<String, Object, Map<String, Object>>
+                            executeSync(redis -> redis.hgetall(redisKey))
                             .entrySet()
                             .stream()
                             .filter(e -> e.getKey().startsWith("_cfg:"))
@@ -425,9 +442,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
             String productId = getProductId();
             if (null != productId) {
                 //获取产品的配置
-                return registry
-                        .getProduct(productId)
-                        .get(key);
+                return registry.getProduct(productId).get(key);
             }
             return NullValueWrapper.instance;
         }
@@ -438,9 +453,10 @@ public class LettuceDeviceOperation implements DeviceOperation {
     @Override
     public void put(String key, Object value) {
         Objects.requireNonNull(value, "value");
-        getSyncRedis().hset(redisKey, key = createConfigKey(key), value);
-        confCache.put(key, value);
-        changedListener.accept(true);
+        String realKey = createConfigKey(key);
+        confCache.put(realKey, value);
+        this.executeAsync(redis -> redis.hset(redisKey, realKey, value)
+                .thenRun(() -> changedListener.accept(true)));
     }
 
     @Override
@@ -453,22 +469,27 @@ public class LettuceDeviceOperation implements DeviceOperation {
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
-        this.<String, Object>getSyncRedis().hmset(redisKey, newMap);
+
+        this.<String, Object>executeAsync(redis -> redis.hmset(redisKey, newMap).thenRun(() -> changedListener.accept(true)));
+
         confCache.putAll(newMap);
-        changedListener.accept(true);
     }
 
     @Override
     public Object remove(String key) {
         Object val = get(key).value().orElse(null);
-        this.getSyncRedis().hdel(redisKey, key = createConfigKey(key));
-        confCache.remove(key);
+
+        String configKey = createConfigKey(key);
+
+        executeAsync(redis -> redis.hdel(redisKey, configKey));
+
+        confCache.remove(configKey);
         changedListener.accept(true);
         return val;
     }
 
     void delete() {
-        this.getSyncRedis().del(redisKey);
+        executeAsync(redis -> redis.del(redisKey));
         changedListener.accept(true);
         confCache.clear();
         localCache.clear();

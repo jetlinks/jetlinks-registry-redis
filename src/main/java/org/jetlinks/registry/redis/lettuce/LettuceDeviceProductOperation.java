@@ -5,7 +5,6 @@ import io.lettuce.core.KeyValue;
 import io.lettuce.core.Value;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
-import io.lettuce.core.api.sync.RedisCommands;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetlinks.core.ProtocolSupport;
@@ -24,6 +23,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -72,22 +73,29 @@ public class LettuceDeviceProductOperation implements DeviceProductOperation {
 
     @SuppressWarnings("all")
     private <T> T tryGetFromLocalCache(String key) {
-        Object val = localCache.computeIfAbsent(key, k -> {
-            return Optional.ofNullable(getSyncRedis().hget(redisKey, key))
-                    .orElse(NullValue.instance);
-        });
+        Object val = localCache.get(key);
         if (val == NullValue.instance) {
             return null;
+        }
+        if (val != null) {
+            return (T) val;
+        } else {
+            localCache.put(key, Optional.ofNullable(val = executeSync(redis -> redis.hget(redisKey, key))).orElse(NullValue.instance));
         }
         return (T) val;
     }
 
     @SneakyThrows
-    private <K, V> RedisCommands<K, V> getSyncRedis() {
-        return plus.<K, V>getConnection()
-                .thenApply(conn -> conn.sync())
+    private <K, V, T> T executeSync(Function<RedisAsyncCommands<K, V>, CompletionStage<T>> function) {
+        return this.<K, V>getAsyncRedis()
+                .thenCompose(function)
                 .toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
+    }
+
+    private <K, V> void executeAsync(Consumer<RedisAsyncCommands<K, V>> consumer) {
+        this.<K, V>getAsyncRedis()
+                .thenAccept(consumer);
     }
 
     protected <K, V> CompletionStage<RedisAsyncCommands<K, V>> getAsyncRedis() {
@@ -98,7 +106,8 @@ public class LettuceDeviceProductOperation implements DeviceProductOperation {
 
     @Override
     public void updateMetadata(String metadata) {
-        getSyncRedis().hset(redisKey, "metadata", metadata);
+        executeAsync(redis -> redis.hset(redisKey, "metadata", metadata));
+
         localCache.put("metadata", metadata);
     }
 
@@ -123,10 +132,9 @@ public class LettuceDeviceProductOperation implements DeviceProductOperation {
         if (info.getProtocol() != null) {
             all.put("protocol", info.getProtocol());
         }
-        getSyncRedis().hmset(redisKey, (Map) all);
+        executeAsync(redis -> redis.hmset(redisKey, (Map) all).thenRun(this.cacheChangedListener::run));
 
         localCache.putAll(all);
-        cacheChangedListener.run();
     }
 
     @Override
@@ -157,7 +165,7 @@ public class LettuceDeviceProductOperation implements DeviceProductOperation {
             if (localCache.containsKey("__all")) {
                 return CompletableFuture.completedFuture((Map<String, Object>) localCache.get("__all"));
             } else {
-                return this.<String,Object>getAsyncRedis()
+                return this.<String, Object>getAsyncRedis()
                         .thenCompose(redis -> {
                             return redis.hgetall(redisKey);
                         })
@@ -214,26 +222,34 @@ public class LettuceDeviceProductOperation implements DeviceProductOperation {
         if (conf == null || conf.isEmpty()) {
             return;
         }
-        Map<Object, Object> newMap = new HashMap<>();
+        Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
         }
-        getSyncRedis().hmset(redisKey, newMap);
-        cacheChangedListener.run();
+        localCache.putAll(newMap);
+
+        this.<String, Object>executeAsync(redis -> {
+            redis.hmset(redisKey, newMap)
+                    .thenRun(this.cacheChangedListener::run);
+        });
     }
 
     @Override
     public void put(String key, Object value) {
-        getSyncRedis().hset(redisKey, createConfigKey(key), value);
-        cacheChangedListener.run();
+        String configKey = createConfigKey(key);
+        localCache.put(configKey, value);
+        executeAsync(redis -> redis.hset(redisKey, createConfigKey(key), value).thenRun(this.cacheChangedListener::run));
     }
 
     @Override
     public Object remove(String key) {
-        Object val =get(key).value().orElse(null);
-        getSyncRedis().hdel(redisKey, key);
+        Object val = get(key).value().orElse(null);
 
-        cacheChangedListener.run();
+        String configKey = createConfigKey(key);
+        localCache.remove(configKey);
+
+        executeAsync(redis -> redis.hdel(redisKey, key).thenRun(cacheChangedListener::run));
+
         return val;
     }
 }

@@ -1,12 +1,7 @@
 package org.jetlinks.registry.redis.lettuce;
 
+import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.StatefulRedisConnection;
-import io.lettuce.core.codec.RedisCodec;
-import io.lettuce.core.output.IntegerOutput;
-import io.lettuce.core.protocol.AsyncCommand;
-import io.lettuce.core.protocol.Command;
-import io.lettuce.core.protocol.CommandArgs;
-import io.lettuce.core.protocol.ProtocolKeyword;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +10,7 @@ import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
 import org.jetlinks.lettuce.LettucePlus;
+import org.jetlinks.lettuce.codec.StringCodec;
 
 import java.util.Map;
 import java.util.Optional;
@@ -44,7 +40,7 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
         this.plus = plus;
 
         //监听消息返回
-        this.plus.<String>getTopic("device:message:reply")
+        this.plus.<String>getTopic(StringCodec.getInstance(), "device:message:reply")
                 .addListener((channel, msg) -> Optional.ofNullable(futureMap.remove(msg))
                         .map(MessageFuture::getFuture)
                         .ifPresent(future -> tryComplete(msg, future)));
@@ -100,7 +96,7 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
                     if (log.isDebugEnabled()) {
                         log.debug("接收到发往设备的消息:{}", message.toJson());
                     }
-                    deviceMessageConsumer.accept(message);
+                    plus.getExecutor().execute(()-> deviceMessageConsumer.accept(message));
                 });
     }
 
@@ -133,23 +129,21 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
 
     @Override
     public CompletionStage<Boolean> reply(DeviceMessageReply message) {
-        MessageFuture future = futureMap.get(message.getMessageId());
+        String messageId = message.getMessageId();
+        MessageFuture future = futureMap.get(messageId);
 
         if (null != future) {
-            futureMap.remove(message.getMessageId());
+            futureMap.remove(messageId);
             future.getFuture().complete(message);
             return CompletableFuture.completedFuture(true);
         }
+        String script = "" +
+                "redis.call('setex',KEYS[1]," + replyExpireTimeSeconds + ",ARGV[1]);" +
+                "return redis.call('publish',KEYS[2],KEYS[3]);";
 
-        return plus.<String, Object>getConnection()
-                .thenCompose(connection -> {
-                    AsyncCommand<String, Object, Long> asyncCommand =
-                            ReplyCommand.EVAL.newCommand(message.getMessageId(), message, plus.getDefaultCodec());
-
-                    connection.dispatch(asyncCommand);
-
-                    return asyncCommand;
-                })
+        return plus.<Long>eval(script, ScriptOutputType.INTEGER,
+                new Object[]{"device:message:reply:".concat(messageId), "device:message:reply", messageId},
+                message)
                 .thenApply((num) -> {
                     if (num <= 0) {
                         log.warn("消息回复[{}]没有任何服务消费", message.getMessageId());
@@ -162,35 +156,6 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
                 });
 
 
-    }
-
-    enum ReplyCommand implements ProtocolKeyword {
-        EVAL;
-        private static final String script =
-                "redis.call('setex',KEYS[1],"+replyExpireTimeSeconds+",ARGV[1]);"
-                        + "return redis.call('publish',KEYS[2],KEYS[3]);";
-
-        private final byte[] name;
-
-        ReplyCommand() {
-            name = name().getBytes();
-        }
-
-        @Override
-        public byte[] getBytes() {
-            return name;
-        }
-
-        AsyncCommand<String, Object, Long> newCommand(String messageId, Object data, RedisCodec<String, Object> codec) {
-            return new AsyncCommand<>(new Command<>(ReplyCommand.EVAL,
-                    new IntegerOutput<>(codec),
-                    new CommandArgs<>(codec)
-                            .add(script)
-                            .add(3)
-                            .addKeys("device:message:reply:".concat(messageId), "device:message:reply", messageId)
-                            .addValues(data)
-            ));
-        }
     }
 
 
