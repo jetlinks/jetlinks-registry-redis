@@ -46,19 +46,18 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
                         .ifPresent(future -> tryComplete(msg, future)));
 
         //定时检查超时消息
-        plus.getExecutor().scheduleAtFixedRate(() -> {
-            futureMap.entrySet()
-                    .stream()
-                    .filter(e -> System.currentTimeMillis() > e.getValue().expireTime)
-                    .forEach((e) -> {
-                        try {
-                            tryComplete(e.getKey(), e.getValue().future);
-                        } finally {
-                            log.info("设备消息[{}]超时未返回", e.getKey());
-                            futureMap.remove(e.getKey());
-                        }
-                    });
-        }, 1, 5, TimeUnit.SECONDS);
+        plus.getExecutor().scheduleAtFixedRate(() -> futureMap
+                .entrySet()
+                .stream()
+                .filter(e -> System.currentTimeMillis() > e.getValue().expireTime)
+                .forEach((e) -> {
+                    try {
+                        tryComplete(e.getKey(), e.getValue().future);
+                    } finally {
+                        log.info("设备消息[{}]超时未返回", e.getKey());
+                        futureMap.remove(e.getKey());
+                    }
+                }), 1, 5, TimeUnit.SECONDS);
     }
 
     private void tryComplete(String messageId, CompletableFuture<Object> future) {
@@ -96,7 +95,7 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
                     if (log.isDebugEnabled()) {
                         log.debug("接收到发往设备的消息:{}", message.toJson());
                     }
-                    plus.getExecutor().execute(()-> deviceMessageConsumer.accept(message));
+                    plus.getExecutor().execute(() -> deviceMessageConsumer.accept(message));
                 });
     }
 
