@@ -12,6 +12,7 @@ import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.lettuce.LettucePlus;
 import org.jetlinks.lettuce.supports.DefaultLettucePlus;
 import org.jetlinks.registry.redis.MockProtocolSupports;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -30,11 +31,12 @@ public class LettuceDeviceRegistryTest {
     private LettuceDeviceRegistry registry;
 
     private DeviceMessageHandler messageHandler;
+    LettucePlus client = DefaultLettucePlus.standalone(RedisClientHelper.createRedisClient());
 
     @Before
     public void init() {
-        LettucePlus client = DefaultLettucePlus.standalone(RedisClientHelper.createRedisClient());
 
+        cleanDb();
 
         messageHandler = new LettuceDeviceMessageHandler(client);
 
@@ -55,6 +57,17 @@ public class LettuceDeviceRegistryTest {
             }
         });
     }
+
+    @SneakyThrows
+    @After
+    public void cleanDb(){
+        client.getConnection()
+                .toCompletableFuture()
+                .get()
+                .sync()
+                .flushdb();
+    }
+
 
     public DeviceInfo newDeviceInfo() {
         DeviceInfo deviceInfo = new DeviceInfo();

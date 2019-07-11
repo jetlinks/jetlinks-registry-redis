@@ -95,7 +95,7 @@ public class LettuceDeviceMessageHandler implements DeviceMessageHandler {
                     if (log.isDebugEnabled()) {
                         log.debug("接收到发往设备的消息:{}", message.toJson());
                     }
-                    plus.getExecutor().execute(() -> deviceMessageConsumer.accept(message));
+                    deviceMessageConsumer.accept(message);
                 });
     }
 
