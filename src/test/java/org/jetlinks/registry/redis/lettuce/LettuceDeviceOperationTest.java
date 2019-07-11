@@ -16,6 +16,7 @@ import org.jetlinks.core.message.property.ReadPropertyMessageReply;
 import org.jetlinks.core.support.JetLinksProtocolSupport;
 import org.jetlinks.lettuce.LettucePlus;
 import org.jetlinks.lettuce.supports.DefaultLettucePlus;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -54,6 +55,16 @@ public class LettuceDeviceOperationTest {
                 return CompletableFuture.completedFuture(reply);
             }
         });
+    }
+
+    @After
+    @SneakyThrows
+    public void after(){
+        client.getConnection()
+                .toCompletableFuture()
+                .get()
+                .sync()
+                .flushdb();
     }
 
     //设备网关服务宕机
