@@ -38,7 +38,10 @@ public class LettuceDeviceOperationTest {
     public LettuceDeviceRegistry registry;
 
     @Before
+    @SneakyThrows
     public void init() {
+        cleanDb();
+
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
         registry = new LettuceDeviceRegistry(client, new LettuceDeviceMessageHandler(client), protocol -> jetLinksProtocolSupport);
@@ -57,15 +60,16 @@ public class LettuceDeviceOperationTest {
         });
     }
 
-    @After
     @SneakyThrows
-    public void after(){
+    @After
+    public void cleanDb(){
         client.getConnection()
                 .toCompletableFuture()
                 .get()
                 .sync()
                 .flushdb();
     }
+
 
     //设备网关服务宕机
     //场景: 设备网关服务宕机，未及时更新设备状态信息。继续往设备发消息时，会执行设备状态检查，更新状态
