@@ -5,7 +5,7 @@
     <parent>
         <artifactId>jetlinks</artifactId>
         <groupId>org.jetlinks</groupId>
-        <version>1.0.0-RC2-SNAPSHOT</version>
+        <version>1.0.0-RC2</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -36,6 +36,12 @@
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-core</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jetlinks</groupId>
+            <artifactId>jetlinks-supports</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <dependency>

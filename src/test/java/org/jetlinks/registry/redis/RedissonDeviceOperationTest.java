@@ -13,7 +13,7 @@ import org.jetlinks.core.message.function.FunctionInvokeMessageReply;
 import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.message.property.ReadPropertyMessage;
 import org.jetlinks.core.message.property.ReadPropertyMessageReply;
-import org.jetlinks.core.support.JetLinksProtocolSupport;
+import org.jetlinks.supports.official.JetLinksProtocolSupport;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
