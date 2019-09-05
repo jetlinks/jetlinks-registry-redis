@@ -159,7 +159,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
     }
 
     @Override
-    public void checkState() {
+    public CompletionStage<Byte> checkState() {
         String serverId = getServerId();
         if (serverId != null) {
             long subscribes = redissonClient
@@ -173,7 +173,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 }
             } else {
                 //等待检查返回,检查是异步的,需要等待检查完成的信号
-                //一般检查速度很快,所以这里超过2秒则超时,继续执行接下来的逻辑
+                //一般检查速度很快,所以这里超过5秒则超时,继续执行接下来的逻辑
                 try {
                     RSemaphore semaphore = redissonClient
                             .getSemaphore("device:state:check:semaphore:".concat(deviceId));
@@ -192,6 +192,7 @@ public class RedissonDeviceOperation implements DeviceOperation {
                 offline();
             }
         }
+        return CompletableFuture.completedFuture(getState());
     }
 
     @Override

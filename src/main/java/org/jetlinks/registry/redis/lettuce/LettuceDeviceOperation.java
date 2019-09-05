@@ -176,23 +176,23 @@ public class LettuceDeviceOperation implements DeviceOperation {
     }
 
     @Override
-    public void checkState() {
+    public CompletionStage<Byte> checkState() {
         String serverId = getServerId();
         if (serverId != null) {
             try {
-                plus.getTopic("device:state:check:".concat(serverId))
+                return plus.getTopic("device:state:check:".concat(serverId))
                         .publish(deviceId)
-                        .whenComplete((subscribes, err) -> {
+                        .thenApply((subscribes) -> {
                             if (subscribes <= 0) {
                                 //没有任何服务在监听话题，则认为服务已经不可用
                                 if (getState() == DeviceState.online) {
                                     log.debug("设备网关服务[{}]未正常运行,设备[{}]下线", serverId, deviceId);
                                     offline();
+                                    return DeviceState.offline;
                                 }
                             }
-                        })
-                        .toCompletableFuture()
-                        .get(1, TimeUnit.SECONDS);
+                            return getState();
+                        });
             } catch (Exception e) {
                 log.error("检查设备状态失败", e);
             }
@@ -202,6 +202,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
                 offline();
             }
         }
+        return CompletableFuture.completedFuture(getState());
     }
 
     @Override

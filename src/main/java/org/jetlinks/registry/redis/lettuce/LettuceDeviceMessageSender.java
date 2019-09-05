@@ -49,7 +49,7 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
 
     protected Supplier<String> connectionServerIdSupplier;
 
-    protected Runnable deviceStateChecker;
+    protected Supplier<CompletionStage<Byte>> deviceStateChecker;
 
     protected String deviceId;
 
@@ -111,9 +111,9 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
 
     public <R extends DeviceMessageReply> CompletionStage<R> retrieveReply(String messageId, Supplier<R> replyNewInstance) {
         return plus
-                .<String,Object>getConnection()
+                .<String, Object>getConnection()
                 .thenApply(StatefulRedisConnection::async)
-                .thenCompose(redis->redis.get("device:message:reply:".concat(messageId)))
+                .thenCompose(redis -> redis.get("device:message:reply:".concat(messageId)))
                 .thenApply(deviceReply -> {
                     R reply = convertReply(deviceReply, null, replyNewInstance);
                     reply.messageId(messageId);
@@ -187,7 +187,7 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
 
         future.whenComplete((r, err) -> {
             if (future.isCancelled()) {
-                log.info("取消等待设备[{}]消息[{}]返回", deviceId,message.getMessageId());
+                log.info("取消等待设备[{}]消息[{}]返回", deviceId, message.getMessageId());
                 stage.toCompletableFuture().cancel(true);
             }
         });
@@ -203,9 +203,13 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
                         //没有任何服务消费此topic,可能所在服务器已经宕机,注册信息没有更新。
                         //执行设备状态检查,尝试更新设备的真实状态
                         if (deviceStateChecker != null) {
-                            deviceStateChecker.run();
+                            deviceStateChecker.get()
+                                    .whenComplete((state, err) -> {
+                                        doReply.accept(ErrorCode.CLIENT_OFFLINE, null);
+                                    });
+                        } else {
+                            doReply.accept(ErrorCode.CLIENT_OFFLINE, null);
                         }
-                        doReply.accept(ErrorCode.CLIENT_OFFLINE, null);
                     }
                     //有多个相同名称的设备网关服务,可能是服务配置错误,启动了多台相同id的服务。
                     if (deviceConnectedServerNumber > 1) {

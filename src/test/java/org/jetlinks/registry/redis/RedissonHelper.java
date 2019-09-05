@@ -18,7 +18,7 @@ public class RedissonHelper {
         Config config = new Config();
         config.useSingleServer()
                 .setAddress(System.getProperty("redis.host", "redis://127.0.0.1:6379"))
-                .setDatabase(0)
+                .setDatabase(5)
                 .setTimeout(10000)
                 .setRetryAttempts(1000)
                 .setRetryInterval(100)
