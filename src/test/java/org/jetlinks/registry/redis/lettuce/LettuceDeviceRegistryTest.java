@@ -31,12 +31,11 @@ public class LettuceDeviceRegistryTest {
     private LettuceDeviceRegistry registry;
 
     private DeviceMessageHandler messageHandler;
-    LettucePlus client = DefaultLettucePlus.standalone(RedisClientHelper.createRedisClient());
+    private LettucePlus client;
 
     @Before
     public void init() {
-
-        cleanDb();
+        client = DefaultLettucePlus.standalone(RedisClientHelper.createRedisClient());
 
         messageHandler = new LettuceDeviceMessageHandler(client);
 
@@ -60,12 +59,13 @@ public class LettuceDeviceRegistryTest {
 
     @SneakyThrows
     @After
-    public void cleanDb(){
+    public void cleanDb() {
         client.getConnection()
                 .toCompletableFuture()
                 .get()
                 .sync()
                 .flushdb();
+        client.shutdown();
     }
 
 
@@ -168,27 +168,28 @@ public class LettuceDeviceRegistryTest {
 
         long time = System.currentTimeMillis();
 
-        CountDownLatch latch=new CountDownLatch(10000);
-        ExecutorService executorService=Executors.newFixedThreadPool(32);
-        for (int i = 0; i < 10000; i++) {
+        CountDownLatch latch = new CountDownLatch(1000);
+        ExecutorService executorService = Executors.newFixedThreadPool(32);
+        for (int i = 0; i < 1000; i++) {
             int fi = i;
             CompletableFuture.runAsync(() -> {
                 try {
                     registry.getDevice(info.getId()).put("test", 123);
                     registry.getDevice(info.getId()).get("test:" + fi);
-                }catch (Exception e){
+                } catch (Exception e) {
                     e.printStackTrace();
-                }finally {
+                } finally {
                     latch.countDown();
                 }
-            },executorService);
+            }, executorService);
         }
-        latch.await(30,TimeUnit.SECONDS);
+        latch.await(30, TimeUnit.SECONDS);
         executorService.shutdown();
         System.out.println(System.currentTimeMillis() - time);
     }
 
     @Test
+    @SneakyThrows
     public void testRegistry() {
         DeviceInfo info = newDeviceInfo();
         try {
@@ -206,6 +207,7 @@ public class LettuceDeviceRegistryTest {
             Assert.assertNull(operation.getSessionId());
         } finally {
             registry.unRegistry(info.getId());
+            Thread.sleep(500);
             DeviceOperation operation = registry.getDevice(info.getId());
             Assert.assertEquals(operation.getState(), DeviceState.unknown);
         }

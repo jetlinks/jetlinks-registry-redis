@@ -31,16 +31,14 @@ import static io.vavr.API.Try;
 
 public class LettuceDeviceOperationTest {
 
-    LettucePlus client = DefaultLettucePlus.standalone( RedisClientHelper.createRedisClient());
-
-
+    private LettucePlus client;
 
     public LettuceDeviceRegistry registry;
 
     @Before
     @SneakyThrows
     public void init() {
-        cleanDb();
+        client = DefaultLettucePlus.standalone(RedisClientHelper.createRedisClient());
 
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
@@ -62,12 +60,13 @@ public class LettuceDeviceOperationTest {
 
     @SneakyThrows
     @After
-    public void cleanDb(){
+    public void cleanDb() {
         client.getConnection()
                 .toCompletableFuture()
                 .get()
                 .sync()
                 .flushdb();
+        client.shutdown();
     }
 
 
@@ -107,7 +106,7 @@ public class LettuceDeviceOperationTest {
         DeviceOperation operation = registry.getDevice("test2");
         operation.online("test3-server", "test");
 
-        Assert.assertEquals(operation.getState(),DeviceState.online);
+        Assert.assertEquals(operation.getState(), DeviceState.online);
 
         Assert.assertEquals(operation.messageSender()
                 .readProperty("test")
@@ -116,7 +115,7 @@ public class LettuceDeviceOperationTest {
                 .map(CommonDeviceMessageReply::getCode)
                 .get(), ErrorCode.CLIENT_OFFLINE.name());
 
-        Assert.assertEquals(operation.getState(),DeviceState.offline);
+        Assert.assertEquals(operation.getState(), DeviceState.offline);
 
     }
 
