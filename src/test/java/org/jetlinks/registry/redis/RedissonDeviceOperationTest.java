@@ -14,6 +14,7 @@ import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.message.property.ReadPropertyMessage;
 import org.jetlinks.core.message.property.ReadPropertyMessageReply;
 import org.jetlinks.supports.official.JetLinksProtocolSupport;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -29,13 +30,13 @@ import static io.vavr.API.Try;
 
 public class RedissonDeviceOperationTest {
 
-    RedissonClient client = RedissonHelper.newRedissonClient();
-
+    RedissonClient client;
 
     public RedissonDeviceRegistry registry;
 
     @Before
     public void init() {
+        client = RedissonHelper.newRedissonClient();
         JetLinksProtocolSupport jetLinksProtocolSupport = new JetLinksProtocolSupport();
 
         registry = new RedissonDeviceRegistry(client, new RedissonDeviceMessageHandler(client), protocol -> jetLinksProtocolSupport);
@@ -54,6 +55,10 @@ public class RedissonDeviceOperationTest {
         });
     }
 
+    @After
+    public void close(){
+        client.shutdown();
+    }
     //设备网关服务宕机
     //场景: 设备网关服务宕机，未及时更新设备状态信息。继续往设备发消息时，会执行设备状态检查，更新状态
     @Test

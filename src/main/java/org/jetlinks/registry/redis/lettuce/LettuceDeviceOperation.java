@@ -469,6 +469,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
     public void put(String key, Object value) {
         Objects.requireNonNull(value, "value");
         String realKey = createConfigKey(key);
+        confCache.remove("__all");
         confCache.put(realKey, value);
         this.executeAsync(redis -> redis.hset(redisKey, realKey, value)
                 .thenRun(() -> changedListener.accept(true)));
@@ -480,6 +481,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
         if (conf == null || conf.isEmpty()) {
             return;
         }
+        confCache.remove("__all");
         Map<String, Object> newMap = new HashMap<>();
         for (Map.Entry<String, Object> entry : conf.entrySet()) {
             newMap.put(createConfigKey(entry.getKey()), entry.getValue());
@@ -492,6 +494,7 @@ public class LettuceDeviceOperation implements DeviceOperation {
 
     @Override
     public Object remove(String key) {
+        confCache.remove("__all");
         Object val = get(key).value().orElse(null);
 
         String configKey = createConfigKey(key);

@@ -9,6 +9,7 @@ import org.jetlinks.core.message.CommonDeviceMessageReply;
 import org.jetlinks.core.message.DeviceMessage;
 import org.jetlinks.core.message.DeviceMessageReply;
 import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -30,10 +31,11 @@ public class RedissonDeviceRegistryTest {
     private RedissonDeviceRegistry registry;
 
     private DeviceMessageHandler messageHandler;
+    RedissonClient client;
 
     @Before
     public void init() {
-        RedissonClient client = RedissonHelper.newRedissonClient();
+        client = RedissonHelper.newRedissonClient();
 
 
         messageHandler = new RedissonDeviceMessageHandler(client);
@@ -52,6 +54,11 @@ public class RedissonDeviceRegistryTest {
                 });
             }
         });
+    }
+
+    @After
+    public void after() {
+        client.shutdown();
     }
 
     public DeviceInfo newDeviceInfo() {
