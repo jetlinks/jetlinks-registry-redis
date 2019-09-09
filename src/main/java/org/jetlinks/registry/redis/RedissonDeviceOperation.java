@@ -10,11 +10,14 @@ import org.jetlinks.core.ProtocolSupports;
 import org.jetlinks.core.device.*;
 import org.jetlinks.core.device.registry.DeviceMessageHandler;
 import org.jetlinks.core.device.registry.DeviceRegistry;
+import org.jetlinks.core.message.DisconnectDeviceMessage;
+import org.jetlinks.core.message.DisconnectDeviceMessageReply;
 import org.jetlinks.core.message.interceptor.DeviceMessageSenderInterceptor;
 import org.jetlinks.core.metadata.DefaultValueWrapper;
 import org.jetlinks.core.metadata.DeviceMetadata;
 import org.jetlinks.core.metadata.NullValueWrapper;
 import org.jetlinks.core.metadata.ValueWrapper;
+import org.jetlinks.core.utils.IdUtils;
 import org.redisson.api.RFuture;
 import org.redisson.api.RMap;
 import org.redisson.api.RSemaphore;
@@ -233,6 +236,17 @@ public class RedissonDeviceOperation implements DeviceOperation {
 
         execute(rMap.putAllAsync(map));
         changedListener.accept(false);
+    }
+
+    @Override
+    public CompletionStage<Boolean> disconnect() {
+        DisconnectDeviceMessage message=new DisconnectDeviceMessage();
+        message.setDeviceId(deviceId);
+        message.setMessageId(IdUtils.newUUID());
+
+        return messageSender
+                .send(message)
+                .thenApply(DisconnectDeviceMessageReply::isSuccess);
     }
 
     @Override

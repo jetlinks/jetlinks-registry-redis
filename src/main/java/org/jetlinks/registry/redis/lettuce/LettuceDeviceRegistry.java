@@ -130,7 +130,10 @@ public class LettuceDeviceRegistry implements DeviceRegistry {
 
     @Override
     public void unRegistry(String deviceId) {
-        getDevice(deviceId).delete();
+        LettuceDeviceOperation operation = getDevice(deviceId);
+        operation.disconnect()
+                .whenComplete((success, error) -> operation.delete());
+
     }
 
 }
