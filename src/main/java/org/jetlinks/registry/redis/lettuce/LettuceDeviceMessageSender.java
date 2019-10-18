@@ -25,6 +25,10 @@ import org.jetlinks.core.metadata.PropertyMetadata;
 import org.jetlinks.core.metadata.ValidateResult;
 import org.jetlinks.core.utils.IdUtils;
 import org.jetlinks.lettuce.LettucePlus;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.util.function.Tuple2;
+import reactor.util.function.Tuples;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -123,7 +127,7 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
 
     @Override
     @SuppressWarnings("all")
-    public <R extends DeviceMessageReply> CompletionStage<R> send(DeviceMessage requestMessage, Function<Object, R> replyMapping) {
+    public <R extends DeviceMessageReply> Flux<R> send(DeviceMessage requestMessage, Function<Object, R> replyMapping) {
         String serverId = connectionServerIdSupplier.get();
         //设备当前没有连接到任何服务器
         if (serverId == null) {
@@ -134,7 +138,7 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
             if (null != reply) {
                 reply.from(requestMessage);
             }
-            return CompletableFuture.completedFuture(reply);
+            return Flux.just(reply);
         }
         CompletableFuture<R> future = new CompletableFuture<>();
         if (interceptor != null) {
@@ -222,7 +226,7 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
 
     @Override
     @SuppressWarnings("all")
-    public <R extends DeviceMessageReply> CompletionStage<R> send(RepayableDeviceMessage<R> message) {
+    public <R extends DeviceMessageReply> Flux<R> send(RepayableDeviceMessage<R> message) {
         return send(message, deviceReply -> convertReply(deviceReply, message, message::newReply));
     }
 
@@ -262,30 +266,39 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
-            public FunctionInvokeMessageSender validate(BiConsumer<FunctionParameter, ValidateResult> resultConsumer) {
-                //获取功能定义
-                FunctionMetadata functionMetadata = operation.getMetadata().getFunction(function)
-                        .orElseThrow(() -> new FunctionUndefinedException(function, "功能[" + function + "]未定义"));
-                List<PropertyMetadata> metadataInputs = functionMetadata.getInputs();
-                List<FunctionParameter> inputs = message.getInputs();
+            public Flux<Tuple2<FunctionParameter, ValidateResult>> validate(BiConsumer<FunctionParameter, ValidateResult> resultConsumer) {
+                return operation
+                        .getMetadata()
+                        .flatMap(metadata -> Mono.justOrEmpty(metadata.getFunction(function)))
+                        .switchIfEmpty(Mono.error(() -> new FunctionUndefinedException(function, "功能[" + function + "]未定义")))
+                        .flatMapMany(functionMetadata -> {
+                            List<PropertyMetadata> metadataInputs = functionMetadata.getInputs();
+                            List<FunctionParameter> inputs = message.getInputs();
 
-                if (inputs.size() != metadataInputs.size()) {
+                            if (inputs.size() != metadataInputs.size()) {
+                                log.warn("调用设备功能[{}]参数数量[需要{},传入{}]错误,功能:{}", function, metadataInputs.size(), inputs.size(), functionMetadata.toString());
+                                throw new IllegalArgumentException("参数数量错误");
+                            }
 
-                    log.warn("调用设备功能[{}]参数数量[需要{},传入{}]错误,功能:{}", function, metadataInputs.size(), inputs.size(), functionMetadata.toString());
-                    throw new IllegalArgumentException("参数数量错误");
-                }
+                            //参数定义转为map,避免n*n循环
+                            Map<String, PropertyMetadata> properties = metadataInputs.stream()
+                                    .collect(Collectors.toMap(PropertyMetadata::getId, Function.identity(), (t1, t2) -> t1));
+                            return Flux.create(sink -> {
+                                try {
+                                    for (FunctionParameter input : message.getInputs()) {
+                                        PropertyMetadata metadata = Optional.ofNullable(properties.get(input.getName()))
+                                                .orElseThrow(() -> new ParameterUndefinedException(input.getName(), "参数[" + input.getName() + "]未定义"));
 
-                //参数定义转为map,避免n*n循环
-                Map<String, PropertyMetadata> properties = metadataInputs.stream()
-                        .collect(Collectors.toMap(PropertyMetadata::getId, Function.identity(), (t1, t2) -> t1));
+                                        sink.next(Tuples.of(input, metadata.getValueType().validate(input.getValue())));
+                                    }
+                                    sink.complete();
+                                } catch (Exception e) {
+                                    sink.error(e);
+                                }
 
-                for (FunctionParameter input : message.getInputs()) {
-                    PropertyMetadata metadata = Optional.ofNullable(properties.get(input.getName()))
-                            .orElseThrow(() -> new ParameterUndefinedException(input.getName(), "参数[" + input.getName() + "]未定义"));
-                    resultConsumer.accept(input, metadata.getValueType().validate(input.getValue()));
-                }
+                            });
+                        });
 
-                return this;
             }
 
             @Override
@@ -311,7 +324,7 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
-            public CompletionStage<FunctionInvokeMessageReply> send() {
+            public Flux<FunctionInvokeMessageReply> send() {
 
                 //如果未明确指定是否异步,则获取元数据中定义的异步配置
                 if (!markAsync && asyncFromMetadata && message.getHeader(Headers.async.getHeader()).isPresent()) {
@@ -399,14 +412,14 @@ public class LettuceDeviceMessageSender implements DeviceMessageSender {
             }
 
             @Override
-            public CompletionStage<WritePropertyMessageReply> retrieveReply() {
+            public Mono<WritePropertyMessageReply> retrieveReply() {
                 return LettuceDeviceMessageSender.this.retrieveReply(
                         Objects.requireNonNull(message.getMessageId(), "messageId can not be null"),
                         WritePropertyMessageReply::new);
             }
 
             @Override
-            public CompletionStage<WritePropertyMessageReply> send() {
+            public Mono<WritePropertyMessageReply> send() {
                 return LettuceDeviceMessageSender.this.send(message);
             }
         };
